@@ -8,6 +8,9 @@ import type {
   PersonaDraft,
   Provider,
   ProviderDraft,
+  ProviderProbeDraft,
+  Worldbook,
+  WorldbookDraft,
 } from "../../domain/types";
 
 const providerKey = "atherloom-react:last-provider";
@@ -26,6 +29,7 @@ function localTimeContext() {
 export function useWorkspace() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
+  const [worldbooks, setWorldbooks] = useState<Worldbook[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [settings, setSettings] = useState<AppSettings>({});
   const [providerId, setProviderIdState] = useState<string | null>(null);
@@ -36,6 +40,7 @@ export function useWorkspace() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const abortRef = useRef<AbortController | null>(null);
+  const settingsRef = useRef<AppSettings>({});
 
   const hydrate = useCallback(async () => {
     setLoading(true);
@@ -44,8 +49,10 @@ export function useWorkspace() {
       const payload = await fastApi.bootstrap();
       setProviders(payload.providers || []);
       setPersonas(payload.personas || []);
+      setWorldbooks(payload.worldbooks || []);
       setConversations(payload.conversations || []);
       setSettings(payload.settings || {});
+      settingsRef.current = payload.settings || {};
 
       const storedProvider = localStorage.getItem(providerKey);
       const storedPersona = localStorage.getItem(personaKey);
@@ -186,15 +193,71 @@ export function useWorkspace() {
     setProviderId(provider.id);
   }, [setProviderId]);
 
+  const updateProvider = useCallback(async (id: string, draft: ProviderDraft) => {
+    const provider = await fastApi.updateProvider(id, draft);
+    setProviders((current) => current.map((item) => item.id === id ? provider : item));
+    return provider;
+  }, []);
+
+  const deleteProvider = useCallback(async (id: string) => {
+    await fastApi.deleteProvider(id);
+    const remaining = providers.filter((item) => item.id !== id);
+    setProviders(remaining);
+    if (providerId === id) setProviderId(remaining[0]?.id || "");
+  }, [providerId, providers, setProviderId]);
+
+  const fetchProviderModels = useCallback((draft: ProviderProbeDraft) => fastApi.fetchProviderModels(draft), []);
+  const testProvider = useCallback((draft: ProviderDraft) => fastApi.testProvider(draft), []);
+
   const createPersona = useCallback(async (draft: PersonaDraft) => {
     const persona = await fastApi.createPersona(draft);
     setPersonas((current) => [...current, persona]);
     setPersonaId(persona.id);
+    return persona;
   }, [setPersonaId]);
+
+  const updatePersona = useCallback(async (id: string, draft: PersonaDraft) => {
+    const persona = await fastApi.updatePersona(id, draft);
+    setPersonas((current) => current.map((item) => item.id === id ? persona : item));
+    return persona;
+  }, []);
+
+  const deletePersona = useCallback(async (id: string) => {
+    await fastApi.deletePersona(id);
+    const remaining = personas.filter((item) => item.id !== id);
+    setPersonas(remaining);
+    setConversations((current) => current.map((item) => item.persona_id === id ? { ...item, persona_id: null } : item));
+    if (personaId === id) setPersonaId(remaining[0]?.id || null);
+  }, [personaId, personas, setPersonaId]);
+
+  const updateSettings = useCallback(async (patch: Partial<AppSettings>) => {
+    const saved = await fastApi.updateSettings({ ...settingsRef.current, ...patch });
+    settingsRef.current = saved;
+    setSettings(saved);
+    return saved;
+  }, []);
+
+  const createWorldbook = useCallback(async (draft: WorldbookDraft) => {
+    const worldbook = await fastApi.createWorldbook(draft);
+    setWorldbooks((current) => [worldbook, ...current]);
+    return worldbook;
+  }, []);
+
+  const updateWorldbook = useCallback(async (id: string, draft: WorldbookDraft) => {
+    const worldbook = await fastApi.updateWorldbook(id, draft);
+    setWorldbooks((current) => current.map((item) => item.id === id ? worldbook : item));
+    return worldbook;
+  }, []);
+
+  const deleteWorldbook = useCallback(async (id: string) => {
+    await fastApi.deleteWorldbook(id);
+    setWorldbooks((current) => current.filter((item) => item.id !== id));
+  }, []);
 
   return {
     providers,
     personas,
+    worldbooks,
     conversations: visibleConversations,
     settings,
     providerId,
@@ -210,7 +273,17 @@ export function useWorkspace() {
     openConversation,
     createConversation,
     createProvider,
+    updateProvider,
+    deleteProvider,
+    fetchProviderModels,
+    testProvider,
     createPersona,
+    updatePersona,
+    deletePersona,
+    updateSettings,
+    createWorldbook,
+    updateWorldbook,
+    deleteWorldbook,
     send,
     stop,
     retry: hydrate,

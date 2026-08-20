@@ -12,17 +12,76 @@ export interface Provider {
   protocol: string;
   base_url: string;
   model: string;
+  models?: string[];
   enabled?: boolean;
   has_api_key?: boolean;
   custom_headers?: string;
   prompt_cache?: boolean;
+  thinking_enabled?: boolean;
+  stream_enabled?: boolean;
+  temperature?: number;
+  top_p?: number;
+  max_tokens?: number;
+  vision_mode?: "auto" | "openai" | "anthropic" | "text";
+  cache_mode?: "auto" | "off" | "anthropic" | "openai";
+  prompt_cache_key?: string;
+}
+
+export interface PersonaConfig {
+  memory_enabled?: boolean;
+  history_enabled?: boolean;
+  summary_frequency?: number;
+  quick_phrases?: string[];
+  custom_headers?: Record<string, unknown>;
+  custom_body?: Record<string, unknown>;
+  regex_rules?: Array<Record<string, unknown>>;
+  tools?: {
+    time?: boolean;
+    clipboard?: boolean;
+    tts?: boolean;
+    ask_user?: boolean;
+    calculator?: boolean;
+  };
+  mcp_servers?: string[];
+  provider_id?: string;
+  stream_enabled?: boolean | null;
+  startup_chat?: "resume" | "new";
+  pinned?: boolean;
+  message_template?: string;
 }
 
 export interface Persona {
   id: string;
   name: string;
   prompt: string;
+  config?: PersonaConfig;
   provider_id?: string | null;
+  created_at?: string;
+}
+
+export interface WorldbookEntry {
+  id: string;
+  name: string;
+  content: string;
+  enabled: boolean;
+  constant: boolean;
+  keywords: string[];
+  use_regex: boolean;
+  case_sensitive: boolean;
+  scan_depth: number;
+  position: "system_before" | "system_after" | "history_before" | "history_after";
+  role: "system" | "user" | "assistant";
+  priority: number;
+}
+
+export interface Worldbook {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  entries: WorldbookEntry[];
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Conversation {
@@ -64,6 +123,9 @@ export interface AppSettings {
   message_density?: "compact" | "comfortable" | "relaxed";
   font_scale?: number;
   stream_speed?: number | string;
+  proactive_questions?: boolean;
+  typing_presence_enabled?: boolean;
+  vision_provider_id?: string;
   [key: string]: unknown;
 }
 
@@ -71,6 +133,7 @@ export interface BootstrapPayload {
   providers: Provider[];
   personas: Persona[];
   conversations: Conversation[];
+  worldbooks: Worldbook[];
   settings: AppSettings;
 }
 
@@ -102,12 +165,38 @@ export interface ProviderDraft {
   base_url: string;
   api_key: string;
   model: string;
+  models: string[];
   enabled: boolean;
   custom_headers: string;
   prompt_cache: boolean;
+  thinking_enabled: boolean;
+  stream_enabled: boolean;
+  temperature: number;
+  top_p: number;
+  max_tokens: number;
+  vision_mode: "auto" | "openai" | "anthropic" | "text";
+  cache_mode: "auto" | "off" | "anthropic" | "openai";
+  prompt_cache_key: string;
+  source_provider_id?: string | null;
+}
+
+export interface ProviderProbeDraft {
+  protocol: string;
+  base_url: string;
+  api_key: string;
+  custom_headers: string;
+  provider_id?: string | null;
 }
 
 export interface PersonaDraft {
   name: string;
   prompt: string;
+  config: PersonaConfig;
+}
+
+export interface WorldbookDraft {
+  name: string;
+  description: string;
+  enabled: boolean;
+  entries: WorldbookEntry[];
 }

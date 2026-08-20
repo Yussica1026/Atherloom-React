@@ -45,7 +45,7 @@ Android 客户端使用独立包名 `app.atherloom.react`，不会覆盖旧版 A
 
 首次打开 APK 后，进入“设置 → 后端连接”，填写电脑或服务器地址，例如 `http://192.168.1.20:8876`。局域网使用时 FastAPI 需要监听 `0.0.0.0`，手机与电脑处于可互访网络；公网使用应配置 HTTPS。详细说明见 [Android 构建说明](android/README.md)。
 
-首个可下载 APK 使用 Android Debug 签名，适合安装测试。固定签名正式版将在 React 功能迁移和真机验证继续完成后发布。
+Android 长期版使用现有 Atherloom 固定发布证书，签名材料只保存在私有 GitHub Actions Secrets 中。工作流在发布前核验证书指纹；从首个固定签名版起，后续同包名 APK 可以覆盖升级。安装过早期 Debug 测试版时，需要先卸载测试版再安装固定签名版。
 
 ## 仓库边界
 

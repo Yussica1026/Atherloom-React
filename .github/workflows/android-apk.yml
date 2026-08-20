@@ -39,31 +39,45 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: "8.10.2"
-      - name: Compile installable debug APK
+      - name: Compile fixed-signature release APK
         working-directory: android
-        run: gradle :app:assembleDebug --stacktrace
+        shell: bash
+        env:
+          ATHERLOOM_KEYSTORE_BASE64: ${{ secrets.ATHERLOOM_KEYSTORE_BASE64 }}
+          ATHERLOOM_STORE_PASSWORD: ${{ secrets.ATHERLOOM_STORE_PASSWORD }}
+          ATHERLOOM_KEY_ALIAS: ${{ secrets.ATHERLOOM_KEY_ALIAS }}
+          ATHERLOOM_KEY_PASSWORD: ${{ secrets.ATHERLOOM_KEY_PASSWORD }}
+        run: |
+          if [ -z "$ATHERLOOM_KEYSTORE_BASE64" ] || [ -z "$ATHERLOOM_STORE_PASSWORD" ] || [ -z "$ATHERLOOM_KEY_ALIAS" ] || [ -z "$ATHERLOOM_KEY_PASSWORD" ]; then
+            echo "::error title=Signing secrets missing::Configure all four ATHERLOOM signing secrets before building."
+            exit 1
+          fi
+          export ATHERLOOM_KEYSTORE_FILE="$RUNNER_TEMP/atherloom-release.p12"
+          printf '%s' "$ATHERLOOM_KEYSTORE_BASE64" | base64 --decode > "$ATHERLOOM_KEYSTORE_FILE"
+          gradle :app:assembleRelease --stacktrace
       - name: Verify APK exists
-        run: test -s android/app/build/outputs/apk/debug/app-debug.apk
+        run: test -s android/app/build/outputs/apk/release/app-release.apk
       - name: Verify APK signature and package
         shell: bash
         run: |
-          APK="android/app/build/outputs/apk/debug/app-debug.apk"
+          APK="android/app/build/outputs/apk/release/app-release.apk"
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)
           "$APKSIGNER" verify --verbose --print-certs "$APK" | tee android/apk-signature.txt
+          grep -Fqi 'c31ec8be3956258e35b852545d43607ea87cbeefa805593633fa0e522033940a' android/apk-signature.txt
           "$AAPT" dump badging "$APK" | tee android/apk-badging.txt
           grep -Fq "package: name='app.atherloom.react'" android/apk-badging.txt
       - name: Prepare release asset
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
-          cp android/app/build/outputs/apk/debug/app-debug.apk Atherloom-React-Android-debug.apk
-          sha256sum Atherloom-React-Android-debug.apk > Atherloom-React-Android-debug.apk.sha256
+          cp android/app/build/outputs/apk/release/app-release.apk Atherloom-React-Android-release.apk
+          sha256sum Atherloom-React-Android-release.apk > Atherloom-React-Android-release.apk.sha256
       - uses: actions/upload-artifact@v7
         with:
-          name: Atherloom-React-Android-debug
+          name: Atherloom-React-Android-release
           path: |
-            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/apk/release/app-release.apk
             android/apk-signature.txt
             android/apk-badging.txt
           if-no-files-found: error
@@ -73,9 +87,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
-            Atherloom-React-Android-debug.apk \
-            Atherloom-React-Android-debug.apk.sha256 \
+            Atherloom-React-Android-release.apk \
+            Atherloom-React-Android-release.apk.sha256 \
             android/apk-signature.txt \
             android/apk-badging.txt \
             --title "Atherloom React $GITHUB_REF_NAME" \
-            --notes "Atherloom React Android 首个测试版。独立包名 app.atherloom.react，不会覆盖旧版。首次打开后请在设置中填写可访问的 FastAPI 后端地址。当前使用 Debug 签名，仅用于安装测试。"
+            --notes "Atherloom React Android 固定签名版。独立包名 app.atherloom.react，不会覆盖旧版 Atherloom。若安装过 v0.1.0 Debug 测试版，需要先卸载测试版再安装本版；从本版起后续固定签名 APK 可以覆盖升级。首次打开后请在设置中填写可访问的 FastAPI 后端地址。"

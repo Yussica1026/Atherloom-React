@@ -12,4 +12,8 @@ http://192.168.1.20:8876
 
 本地构建前先在仓库根目录运行 `npm run build`，再进入 `android` 执行 `gradle :app:assembleDebug`。没有 Android SDK 的电脑可以使用仓库内 GitHub Actions 构建。
 
-当前首个 APK 使用 Android Debug 签名，适合安装测试；后续正式更新前需要配置固定发布签名。
+长期版使用现有 Atherloom 固定发布证书，通过私有 GitHub Actions Secrets 注入签名材料。工作流会在上传前使用 `apksigner` 核对证书 SHA-256 指纹，不匹配就终止发布。
+
+签名材料不得进入仓库。构建需要四项私有 Secrets：`ATHERLOOM_KEYSTORE_BASE64`、`ATHERLOOM_STORE_PASSWORD`、`ATHERLOOM_KEY_ALIAS`、`ATHERLOOM_KEY_PASSWORD`。
+
+如果已经安装 `v0.1.0-react` Debug 测试版，需要先卸载测试版，再安装首个固定签名版。之后只要应用包名与签名原件保持不变，后续 APK 就能覆盖升级并保留应用数据。

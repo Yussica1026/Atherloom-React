@@ -39,6 +39,14 @@ npm run dev
 
 打开 `http://127.0.0.1:5173/`。Vite 会把 `/api` 代理到 `http://127.0.0.1:8876`。
 
+## Android 测试版
+
+Android 客户端使用独立包名 `app.atherloom.react`，不会覆盖旧版 Atherloom。APK 内置 React 页面，通过原生网络桥连接现有 FastAPI 后端，不把 API Key、数据库或聊天记录打进安装包。
+
+首次打开 APK 后，进入“设置 → 后端连接”，填写电脑或服务器地址，例如 `http://192.168.1.20:8876`。局域网使用时 FastAPI 需要监听 `0.0.0.0`，手机与电脑处于可互访网络；公网使用应配置 HTTPS。详细说明见 [Android 构建说明](android/README.md)。
+
+首个可下载 APK 使用 Android Debug 签名，适合安装测试。固定签名正式版将在 React 功能迁移和真机验证继续完成后发布。
+
 ## 仓库边界
 
 - 本仓库不保存 API Key、Token、私人数据库、聊天记录或未脱敏日志。

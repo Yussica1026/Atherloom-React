@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import type { Persona, PersonaDraft, Provider, ProviderDraft, ThemeName } from "../../domain/types";
 import { CloseIcon } from "../../components/Icons";
 
@@ -7,8 +7,10 @@ interface SettingsPanelProps {
   providers: Provider[];
   personas: Persona[];
   theme: ThemeName;
+  apiBase: string;
   onClose: () => void;
   onThemeChange: (theme: ThemeName) => void;
+  onApiBaseChange: (value: string) => void;
   onCreateProvider: (draft: ProviderDraft) => Promise<void>;
   onCreatePersona: (draft: PersonaDraft) => Promise<void>;
 }
@@ -28,16 +30,34 @@ export function SettingsPanel({
   providers,
   personas,
   theme,
+  apiBase,
   onClose,
   onThemeChange,
+  onApiBaseChange,
   onCreateProvider,
   onCreatePersona,
 }: SettingsPanelProps) {
-  const [tab, setTab] = useState<"providers" | "personas" | "appearance">("providers");
+  const [tab, setTab] = useState<"connection" | "providers" | "personas" | "appearance">("connection");
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");
+  const [apiBaseDraft, setApiBaseDraft] = useState(apiBase);
+
+  useEffect(() => {
+    if (open) setApiBaseDraft(apiBase);
+  }, [apiBase, open]);
 
   if (!open) return null;
+
+  const submitConnection = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setStatus("正在保存后端地址…");
+    try {
+      onApiBaseChange(apiBaseDraft);
+      setStatus("后端地址已保存");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "后端地址保存失败");
+    }
+  };
 
   const submitProvider = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -94,11 +114,34 @@ export function SettingsPanel({
         </header>
         <div className="settings-layout">
           <nav className="settings-nav" aria-label="设置分类">
+            <button className={tab === "connection" ? "active" : ""} onClick={() => setTab("connection")}>后端连接</button>
             <button className={tab === "providers" ? "active" : ""} onClick={() => setTab("providers")}>API 与网关</button>
             <button className={tab === "personas" ? "active" : ""} onClick={() => setTab("personas")}>人格指令</button>
             <button className={tab === "appearance" ? "active" : ""} onClick={() => setTab("appearance")}>外观</button>
           </nav>
           <div className="settings-content">
+            {tab === "connection" ? (
+              <div className="settings-section">
+                <div className="section-heading">
+                  <h3>后端连接</h3>
+                  <p>Android 版填写运行 Atherloom FastAPI 的电脑或服务器地址；网页同域部署可以留空。</p>
+                </div>
+                <form className="settings-form one-column" onSubmit={submitConnection}>
+                  <label>
+                    FastAPI 根地址
+                    <input
+                      name="api_base"
+                      inputMode="url"
+                      value={apiBaseDraft}
+                      onChange={(event) => setApiBaseDraft(event.target.value)}
+                      placeholder="http://192.168.1.20:8876"
+                    />
+                  </label>
+                  <p className="form-hint">手机与电脑需要能够互相访问。公网使用请配置 HTTPS；HTTP 只建议用于可信的同一局域网。</p>
+                  <button className="primary-button">保存并重新连接</button>
+                </form>
+              </div>
+            ) : null}
             {tab === "providers" ? (
               <div className="settings-section">
                 <div className="section-heading"><h3>API 与网关</h3><p>先迁移最初架构里的真实线路字段；高级参数随后补齐。</p></div>

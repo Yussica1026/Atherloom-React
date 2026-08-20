@@ -41,6 +41,12 @@ with sync_playwright() as playwright:
     page.get_by_role("heading", name="今天想聊些什么？").wait_for()
 
     page.get_by_role("button", name="打开设置").click()
+    connection_form = page.locator("form.settings-form").first
+    connection_form.get_by_label("FastAPI 根地址").fill("ftp://invalid.example")
+    connection_form.get_by_role("button", name="保存并重新连接").click()
+    page.get_by_text("后端地址必须使用 http:// 或 https://", exact=True).wait_for()
+
+    page.get_by_role("button", name="API 与网关", exact=True).click()
     provider_form = page.locator("form.settings-form").first
     provider_form.get_by_label("显示名称").fill("本地验证线路")
     provider_form.get_by_label("Base URL").fill("https://example.invalid/v1")
@@ -138,5 +144,5 @@ print(json.dumps({
     "mobile": str(artifacts / "react-mobile.png"),
     "themes": str(artifacts / "theme-palette.png"),
     "mobile_metrics": mobile_metrics,
-    "checks": ["bootstrap", "provider", "persona", "seven theme modes", "conversation", "chat stream", "markdown", "mobile sidebar"],
+    "checks": ["bootstrap", "backend address validation", "provider", "persona", "seven theme modes", "conversation", "chat stream", "markdown", "mobile sidebar"],
 }, ensure_ascii=False, indent=2))

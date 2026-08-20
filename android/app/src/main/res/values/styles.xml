@@ -1,0 +1,11 @@
+<resources>
+    <style name="Theme.AtherloomReact" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#C96442</item>
+        <item name="android:navigationBarColor">#F7F6F2</item>
+        <item name="android:statusBarColor">#F7F6F2</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowSoftInputMode">adjustResize</item>
+        <item name="android:windowBackground">#F7F6F2</item>
+    </style>
+</resources>

@@ -10,10 +10,40 @@ import type {
   ProviderDraft,
 } from "../../domain/types";
 
-const configuredBase = String(import.meta.env.VITE_API_BASE || "").replace(/\/$/, "");
+const apiBaseKey = "atherloom-react:api-base";
+
+function normalizeBase(value: string) {
+  const normalized = value.trim().replace(/\/+$/, "");
+  if (!normalized) return "";
+  const parsed = new URL(normalized);
+  if (!(["http:", "https:"] as string[]).includes(parsed.protocol)) {
+    throw new Error("后端地址必须使用 http:// 或 https://");
+  }
+  if (parsed.pathname !== "/" || parsed.search || parsed.hash) {
+    throw new Error("后端地址只填写服务器根地址，例如 http://192.168.1.20:8876");
+  }
+  return normalized;
+}
+
+export function getApiBase() {
+  if (window.AtherloomNative) return window.AtherloomNative.getBackendUrl() || "";
+  return localStorage.getItem(apiBaseKey) || String(import.meta.env.VITE_API_BASE || "").replace(/\/$/, "");
+}
+
+export function setApiBase(value: string) {
+  const normalized = normalizeBase(value);
+  if (window.AtherloomNative) {
+    const result = JSON.parse(window.AtherloomNative.setBackendUrl(normalized)) as { ok?: boolean; error?: string };
+    if (!result.ok) throw new Error(result.error || "后端地址保存失败");
+    return normalized;
+  }
+  if (normalized) localStorage.setItem(apiBaseKey, normalized);
+  else localStorage.removeItem(apiBaseKey);
+  return normalized;
+}
 
 function endpoint(path: string) {
-  return `${configuredBase}${path}`;
+  return `${getApiBase()}${path}`;
 }
 
 async function readError(response: Response) {
@@ -27,6 +57,18 @@ async function readError(response: Response) {
 }
 
 export async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+  if (window.AtherloomNative) {
+    const method = String(init.method || "GET").toUpperCase();
+    const body = typeof init.body === "string" ? init.body : "";
+    const raw = window.AtherloomNative.apiRequest(method, path, body);
+    const result = JSON.parse(raw) as { ok?: boolean; status?: number; body?: string; error?: string };
+    if (!result.ok) throw new Error(result.error || `请求失败 ${result.status || ""}`.trim());
+    try {
+      return JSON.parse(result.body || "null") as T;
+    } catch {
+      throw new Error("后端返回了无法识别的数据");
+    }
+  }
   const response = await fetch(endpoint(path), {
     ...init,
     headers: {
@@ -36,6 +78,71 @@ export async function requestJson<T>(path: string, init: RequestInit = {}): Prom
   });
   if (!response.ok) throw new Error(await readError(response));
   return response.json() as Promise<T>;
+}
+
+interface NativeStreamHandler {
+  onEvent: (event: ChatStreamEvent) => void;
+  resolve: () => void;
+  reject: (error: Error) => void;
+  cleanup: () => void;
+}
+
+const nativeStreams = new Map<string, NativeStreamHandler>();
+
+if (typeof window !== "undefined") {
+  window.AtherloomNativeStream = (callbackId, rawEvent) => {
+    const handler = nativeStreams.get(callbackId);
+    if (!handler) return;
+    try {
+      const event = JSON.parse(rawEvent) as ChatStreamEvent;
+      if (event.error) {
+        handler.cleanup();
+        handler.reject(new Error(event.error));
+        return;
+      }
+      handler.onEvent(event);
+      if (event.done) {
+        handler.cleanup();
+        handler.resolve();
+      }
+    } catch {
+      handler.cleanup();
+      handler.reject(new Error("Android 原生桥返回了无法识别的数据"));
+    }
+  };
+}
+
+function streamChatNative(
+  request: ChatRequest,
+  signal: AbortSignal,
+  onEvent: (event: ChatStreamEvent) => void,
+) {
+  const bridge = window.AtherloomNative;
+  if (!bridge) throw new Error("Android 原生桥不可用");
+  const callbackId = `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise<void>((resolve, reject) => {
+    const abort = () => {
+      bridge.cancelStream(callbackId);
+      cleanup();
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    const cleanup = () => {
+      signal.removeEventListener("abort", abort);
+      nativeStreams.delete(callbackId);
+    };
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+    nativeStreams.set(callbackId, { onEvent, resolve, reject, cleanup });
+    signal.addEventListener("abort", abort, { once: true });
+    try {
+      bridge.chatStream("/api/chat", JSON.stringify(request), callbackId);
+    } catch (error) {
+      cleanup();
+      reject(error instanceof Error ? error : new Error("无法启动 Android 流式请求"));
+    }
+  });
 }
 
 export const fastApi = {
@@ -66,6 +173,7 @@ export async function streamChat(
   signal: AbortSignal,
   onEvent: (event: ChatStreamEvent) => void,
 ) {
+  if (window.AtherloomNative) return streamChatNative(request, signal, onEvent);
   const response = await fetch(endpoint("/api/chat"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },

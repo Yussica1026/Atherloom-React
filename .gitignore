@@ -11,3 +11,10 @@ __pycache__/
 .DS_Store
 Thumbs.db
 artifacts/
+android/.gradle/
+android/local.properties
+android/app/build/
+android/app/src/main/assets/
+*.jks
+*.keystore
+*.p12

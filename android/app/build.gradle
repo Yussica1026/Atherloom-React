@@ -1,0 +1,36 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'app.atherloom.react'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'app.atherloom.react'
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName '0.1.0-react'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.12.1'
+}
+
+tasks.register('syncWebAssets', Copy) {
+    from('../../dist')
+    into('src/main/assets')
+}
+preBuild.dependsOn syncWebAssets

@@ -147,6 +147,7 @@ button:disabled { cursor: not-allowed; }
 .connection-state img { width: 54px; height: 54px; border-radius: 15px; }
 .connection-state h1 { color: var(--text); }
 .connection-state p { max-width: 520px; margin: 0; line-height: 1.65; }
+.connection-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 9px; }
 .loader { width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
 .inline-error { margin-bottom: 20px; padding: 10px 13px; border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border)); border-radius: 10px; color: var(--danger); background: color-mix(in srgb, var(--danger) 7%, var(--surface)); }
 
@@ -177,6 +178,8 @@ button:disabled { cursor: not-allowed; }
 .settings-form input:focus, .settings-form select:focus, .settings-form textarea:focus, .theme-setting select:focus { border-color: var(--accent); }
 .settings-form textarea { resize: vertical; line-height: 1.55; }
 .primary-button { justify-self: start; border: 0; border-radius: 9px; padding: 10px 15px; background: var(--text); color: var(--bg); font-weight: 650; }
+.secondary-button { border: 1px solid var(--border); border-radius: 9px; padding: 9px 14px; background: var(--surface); color: var(--text); font-weight: 650; }
+.form-hint { margin: -2px 0 2px; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .settings-status { position: absolute; left: clamp(24px, 5vw, 54px); bottom: 20px; min-height: 18px; color: var(--muted); font-size: 12px; }
 .theme-setting { max-width: 260px; }
 .theme-swatches { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 22px; }

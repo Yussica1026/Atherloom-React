@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "android:prepare": "npm run build",
     "typecheck": "tsc -b --pretty false",
     "preview": "vite preview"
   },

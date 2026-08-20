@@ -43,7 +43,7 @@ export function Sidebar({
     <aside className="sidebar" aria-label="Atherloom 侧栏">
       <div className="sidebar-top">
         <button className="brand-button" type="button" onClick={onClose} aria-label="收起侧栏">
-          <img src="/app-icon.svg" alt="" />
+          <img src="./app-icon.svg" alt="" />
           <span>Atherloom</span>
         </button>
         <button className="new-chat" type="button" onClick={onNewConversation}>

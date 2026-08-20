@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { getApiBase, setApiBase } from "../adapters/fastapi/client";
 import { MenuIcon, SettingsIcon, SparkIcon } from "../components/Icons";
 import { isThemeName, type ThemeName } from "../domain/types";
 import { Composer } from "../features/chat/Composer";
@@ -111,10 +112,13 @@ export default function App() {
           {workspace.loading ? <div className="center-state"><span className="loader" /><p>正在打开 Atherloom</p></div> : null}
           {!workspace.loading && workspace.error && !workspace.providers.length && !workspace.conversations.length ? (
             <div className="connection-state">
-              <img src="/app-icon.svg" alt="" />
+              <img src="./app-icon.svg" alt="" />
               <h1>本地后端还没有连接</h1>
               <p>{workspace.error}</p>
-              <button className="primary-button" onClick={() => void workspace.retry()}>重新连接</button>
+              <div className="connection-actions">
+                <button className="primary-button" onClick={() => setSettingsOpen(true)}>设置后端地址</button>
+                <button className="secondary-button" onClick={() => void workspace.retry()}>重新连接</button>
+              </div>
             </div>
           ) : null}
           {!workspace.loading && !hasConversationContent && !workspace.error ? (
@@ -147,8 +151,13 @@ export default function App() {
         providers={workspace.providers}
         personas={workspace.personas}
         theme={theme}
+        apiBase={getApiBase()}
         onClose={() => setSettingsOpen(false)}
         onThemeChange={setTheme}
+        onApiBaseChange={(value) => {
+          setApiBase(value);
+          window.location.reload();
+        }}
         onCreateProvider={workspace.createProvider}
         onCreatePersona={workspace.createPersona}
       />

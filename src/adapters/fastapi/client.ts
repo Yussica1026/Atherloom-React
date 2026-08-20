@@ -3,11 +3,15 @@ import type {
   ChatRequest,
   ChatStreamEvent,
   Conversation,
+  AppSettings,
   Message,
   Persona,
   PersonaDraft,
   Provider,
   ProviderDraft,
+  ProviderProbeDraft,
+  Worldbook,
+  WorldbookDraft,
 } from "../../domain/types";
 
 const apiBaseKey = "atherloom-react:api-base";
@@ -156,8 +160,28 @@ export const fastApi = {
     }),
   createProvider: (draft: ProviderDraft) =>
     requestJson<Provider>("/api/providers", { method: "POST", body: JSON.stringify(draft) }),
+  updateProvider: (id: string, draft: ProviderDraft) =>
+    requestJson<Provider>(`/api/providers/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(draft) }),
+  deleteProvider: (id: string) =>
+    requestJson<{ ok: boolean }>(`/api/providers/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  fetchProviderModels: (draft: ProviderProbeDraft) =>
+    requestJson<{ models: string[] }>("/api/providers/models", { method: "POST", body: JSON.stringify(draft) }),
+  testProvider: (draft: ProviderDraft) =>
+    requestJson<{ ok?: boolean; message: string }>("/api/providers/test", { method: "POST", body: JSON.stringify(draft) }),
   createPersona: (draft: PersonaDraft) =>
     requestJson<Persona>("/api/personas", { method: "POST", body: JSON.stringify(draft) }),
+  updatePersona: (id: string, draft: PersonaDraft) =>
+    requestJson<Persona>(`/api/personas/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(draft) }),
+  deletePersona: (id: string) =>
+    requestJson<{ ok: boolean }>(`/api/personas/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  updateSettings: (settings: AppSettings) =>
+    requestJson<AppSettings>("/api/settings", { method: "PUT", body: JSON.stringify(settings) }),
+  createWorldbook: (draft: WorldbookDraft) =>
+    requestJson<Worldbook>("/api/worldbooks", { method: "POST", body: JSON.stringify(draft) }),
+  updateWorldbook: (id: string, draft: WorldbookDraft) =>
+    requestJson<Worldbook>(`/api/worldbooks/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(draft) }),
+  deleteWorldbook: (id: string) =>
+    requestJson<{ ok: boolean }>(`/api/worldbooks/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };
 
 function parseEventLine(line: string): ChatStreamEvent | null {

@@ -150,6 +150,8 @@ export default function App() {
         open={settingsOpen}
         providers={workspace.providers}
         personas={workspace.personas}
+        worldbooks={workspace.worldbooks}
+        settings={workspace.settings}
         theme={theme}
         apiBase={getApiBase()}
         onClose={() => setSettingsOpen(false)}
@@ -159,7 +161,17 @@ export default function App() {
           window.location.reload();
         }}
         onCreateProvider={workspace.createProvider}
+        onUpdateProvider={workspace.updateProvider}
+        onDeleteProvider={workspace.deleteProvider}
+        onFetchProviderModels={workspace.fetchProviderModels}
+        onTestProvider={workspace.testProvider}
         onCreatePersona={workspace.createPersona}
+        onUpdatePersona={workspace.updatePersona}
+        onDeletePersona={workspace.deletePersona}
+        onSettingsChange={workspace.updateSettings}
+        onCreateWorldbook={workspace.createWorldbook}
+        onUpdateWorldbook={workspace.updateWorldbook}
+        onDeleteWorldbook={workspace.deleteWorldbook}
       />
     </div>
   );

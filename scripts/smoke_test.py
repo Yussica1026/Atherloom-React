@@ -1,5 +1,7 @@
+import argparse
 import json
 from pathlib import Path
+from uuid import uuid4
 
 from playwright.sync_api import Route, sync_playwright
 
@@ -8,17 +10,30 @@ root = Path(__file__).resolve().parents[1]
 artifacts = root / "artifacts"
 artifacts.mkdir(exist_ok=True)
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--base-url", default="http://127.0.0.1:5173")
+base_url = parser.parse_args().base_url.rstrip("/")
+run_id = uuid4().hex[:7]
+seed_provider_name = f"待删除线路-{run_id}"
+seed_persona_name = f"待删除人格-{run_id}"
+seed_worldbook_name = f"待删除世界书-{run_id}"
+provider_name = f"本地验证线路-{run_id}"
+persona_name = f"阿栈 · 验证人格-{run_id}"
+edited_persona_name = f"阿栈 · 已编辑-{run_id}"
+worldbook_name = f"雾港设定集-{run_id}"
+imported_worldbook_name = f"导入验证书-{run_id}"
+
 
 def mock_chat(route: Route) -> None:
     events = [
         {"reasoning_delta": "先确认界面与流式协议。"},
-        {"delta": "你好，枔枔。这里是 **Atherloom React** 迁移首版。"},
-        {"delta": "\n\n- React + TypeScript\n- 真实 FastAPI 结构\n- Claude 风格暖色界面"},
+        {"delta": "你好，枔枔。这里是 **Atherloom React** 设置迁移版。"},
+        {"delta": "\n\n- React + TypeScript\n- 完整设置 CRUD\n- 旧版 Atherloom 视觉"},
         {
             "done": True,
             "assistant_id": "assistant-e2e",
             "user_id": "user-e2e",
-            "title": "React 首版验证",
+            "title": "React 设置验证",
             "usage": {"input_tokens": 18, "output_tokens": 35, "total_tokens": 53},
         },
     ]
@@ -29,38 +44,251 @@ def mock_chat(route: Route) -> None:
     )
 
 
+def mock_models(route: Route) -> None:
+    route.fulfill(
+        status=200,
+        content_type="application/json; charset=utf-8",
+        body=json.dumps({"models": ["mock-primary", "mock-vision", "mock-reasoner"]}),
+    )
+
+
+def mock_provider_test(route: Route) -> None:
+    route.fulfill(
+        status=200,
+        content_type="application/json; charset=utf-8",
+        body=json.dumps({"ok": True, "message": "测试连接成功"}, ensure_ascii=False),
+    )
+
+
+def provider_payload(name: str) -> dict:
+    return {
+        "name": name,
+        "protocol": "deepseek",
+        "base_url": "https://example.invalid",
+        "api_key": "not-a-real-key",
+        "model": "delete-me",
+        "models": ["delete-me"],
+        "enabled": True,
+        "custom_headers": "{}",
+        "prompt_cache": True,
+        "thinking_enabled": True,
+        "stream_enabled": True,
+        "temperature": 0.7,
+        "top_p": 1,
+        "max_tokens": 4096,
+        "vision_mode": "auto",
+        "cache_mode": "auto",
+        "prompt_cache_key": "",
+    }
+
+
+def field(form, label: str, selector: str):
+    return form.locator("label", has_text=label).locator(selector).first
+
+
+def set_switch(page, label: str, checked: bool) -> None:
+    control = page.get_by_label(label)
+    if control.is_checked() != checked:
+        control.locator("xpath=following-sibling::span").click()
+    page.wait_for_function(
+        "args => args.control.checked === args.checked",
+        arg={"control": control.element_handle(), "checked": checked},
+    )
+
+
+def card(page, title: str):
+    cards = page.locator("article.settings-list-card")
+    titles: list[str] = []
+    for index in range(cards.count()):
+        current = cards.nth(index)
+        heading = current.locator(".settings-list-copy > strong")
+        if not heading.count():
+            continue
+        current_title = heading.inner_text().strip()
+        titles.append(current_title)
+        if current_title == title:
+            return current
+    raise AssertionError(f"没有找到设置卡片 {title!r}；当前卡片：{titles!r}")
+
+
+def wait_card_gone(page, title: str) -> None:
+    page.wait_for_function(
+        "title => [...document.querySelectorAll('article.settings-list-card .settings-list-copy > strong')].every(node => node.textContent.trim() !== title)",
+        arg=title,
+    )
+
+
 with sync_playwright() as playwright:
     browser = playwright.chromium.launch(channel="msedge", headless=True)
     page = browser.new_page(viewport={"width": 1440, "height": 960}, device_scale_factor=1)
     console_errors: list[str] = []
     page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
     page.on("pageerror", lambda error: console_errors.append(str(error)))
+    page.on("dialog", lambda dialog: dialog.accept())
     page.route("**/api/chat", mock_chat)
+    page.route("**/api/providers/models", mock_models)
+    page.route("**/api/providers/test", mock_provider_test)
 
-    page.goto("http://127.0.0.1:5173/", wait_until="networkidle")
+    seed_provider = page.request.post(f"{base_url}/api/providers", data=provider_payload(seed_provider_name))
+    assert seed_provider.ok, seed_provider.text()
+    seed_persona = page.request.post(f"{base_url}/api/personas", data={"name": seed_persona_name, "prompt": "仅供删除测试", "config": {}})
+    assert seed_persona.ok, seed_persona.text()
+    seed_worldbook = page.request.post(f"{base_url}/api/worldbooks", data={"name": seed_worldbook_name, "description": "仅供删除测试", "enabled": True, "entries": []})
+    assert seed_worldbook.ok, seed_worldbook.text()
+
+    page.goto(f"{base_url}/", wait_until="domcontentloaded")
+    launch = page.locator("#launchScreen")
+    launch.wait_for(state="visible")
+    launch_metrics = page.evaluate("""() => ({
+      mode: document.documentElement.dataset.launchMode,
+      markAnimation: getComputedStyle(document.querySelector('.launch-mark')).animationName,
+      drawAnimation: getComputedStyle(document.querySelector('.launch-a')).animationName,
+      accent: getComputedStyle(document.querySelector('.launch-star')).fill,
+    })""")
+    assert launch_metrics == {
+        "mode": "full",
+        "markAnimation": "launchBreath",
+        "drawAnimation": "launchDraw",
+        "accent": "rgb(201, 100, 66)",
+    }, launch_metrics
+    page.wait_for_timeout(850)
+    page.screenshot(path=artifacts / "launch-animation.png", full_page=True)
+    launch.wait_for(state="detached", timeout=3000)
+    page.wait_for_load_state("networkidle")
     page.get_by_role("heading", name="今天想聊些什么？").wait_for()
-
     page.get_by_role("button", name="打开设置").click()
-    connection_form = page.locator("form.settings-form").first
-    connection_form.get_by_label("FastAPI 根地址").fill("ftp://invalid.example")
-    connection_form.get_by_role("button", name="保存并重新连接").click()
-    page.get_by_text("后端地址必须使用 http:// 或 https://", exact=True).wait_for()
+    page.get_by_role("heading", name="API 与网关").wait_for()
 
-    page.get_by_role("button", name="API 与网关", exact=True).click()
-    provider_form = page.locator("form.settings-form").first
-    provider_form.get_by_label("显示名称").fill("本地验证线路")
-    provider_form.get_by_label("Base URL").fill("https://example.invalid/v1")
-    provider_form.get_by_label("API Key").fill("not-a-real-key")
-    provider_form.get_by_label("模型 ID").fill("mock-model")
-    provider_form.get_by_role("button", name="保存线路").click()
+    delete_provider_card = card(page, seed_provider_name)
+    delete_provider_card.get_by_role("button", name="删除").click()
+    wait_card_gone(page, seed_provider_name)
+
+    page.get_by_role("button", name="添加线路").click()
+    provider_form = page.locator("form.settings-edit-card").first
+    field(provider_form, "供应商 / 协议", "select").select_option("deepseek")
+    field(provider_form, "显示名称", "input").fill(provider_name)
+    field(provider_form, "官方或反代 Base URL", "input").fill("https://example.invalid")
+    field(provider_form, "API Key", "input").fill("not-a-real-key")
+    field(provider_form, "当前默认模型", "input").fill("mock-primary")
+    field(provider_form, "已配置的模型", "textarea").fill("mock-primary\nmock-reasoner")
+    field(provider_form, "温度 Temperature", "input").fill("0.4")
+    field(provider_form, "Top P", "input").fill("0.85")
+    field(provider_form, "最大输出 Tokens", "input").fill("8192")
+    field(provider_form, "图片能力", "select").select_option("openai")
+    field(provider_form, "提示词缓存", "select").select_option("openai")
+    field(provider_form, "OpenAI 缓存键", "input").fill("persona-e2e")
+    field(provider_form, "自定义请求头", "textarea").fill('{"X-Test":"safe"}')
+    provider_form.get_by_role("button", name="保存线路与模型").click()
     page.get_by_text("线路已保存", exact=True).wait_for()
 
-    page.get_by_role("button", name="人格指令").click()
-    persona_form = page.locator("form.settings-form").first
-    persona_form.get_by_label("人格名称").fill("阿栈 · 验证人格")
-    persona_form.get_by_label("系统指令").fill("这是只用于界面测试的脱敏人格。")
+    provider_card = card(page, provider_name)
+    provider_text = provider_card.inner_text()
+    provider_state = page.request.get(f"{base_url}/api/bootstrap").json()["providers"]
+    assert "mock-reasoner" in provider_text, json.dumps({"card": provider_text, "providers": provider_state}, ensure_ascii=True)
+    provider_card.get_by_role("button", name="编辑").click()
+    provider_form = page.locator("form.settings-edit-card").first
+    assert field(provider_form, "API Key", "input").input_value() == ""
+    assert "留空" in field(provider_form, "API Key", "input").get_attribute("placeholder")
+    provider_form.get_by_role("button", name="拉取模型").click()
+    fetched = provider_form.get_by_label("选择已拉取的模型")
+    fetched.wait_for()
+    fetched.select_option("mock-vision")
+    provider_form.get_by_role("button", name="测试当前模型").click()
+    page.get_by_text("测试连接成功", exact=True).wait_for()
+    provider_form.get_by_role("button", name="保存线路与模型").click()
+    page.get_by_text("线路修改已保存", exact=True).wait_for()
+    provider_card = card(page, provider_name)
+    provider_card.get_by_text("mock-vision", exact=True).wait_for()
+    vision_select = page.get_by_label("图片理解线路")
+    vision_select.select_option(label=f"{provider_name} · mock-vision")
+
+    page.screenshot(path=artifacts / "settings-api-desktop.png", full_page=True)
+
+    page.get_by_role("button", name="人格指令", exact=True).click()
+    set_switch(page, "允许助手主动提问", True)
+    page.wait_for_timeout(800)
+    saved_settings = page.request.get(f"{base_url}/api/bootstrap").json()["settings"]
+    assert saved_settings["proactive_questions"] is True, json.dumps(saved_settings, ensure_ascii=True)
+    delete_persona_card = card(page, seed_persona_name)
+    delete_persona_card.get_by_role("button", name="删除").click()
+    wait_card_gone(page, seed_persona_name)
+
+    persona_form = page.locator("form.persona-form")
+    field(persona_form, "助手名称", "input").fill(persona_name)
+    page.get_by_label("专属模型线路").select_option(label=f"{provider_name} · mock-vision")
+    set_switch(page, "置顶人格", True)
+    page.get_by_role("button", name="提示词", exact=True).click()
+    field(persona_form, "系统提示词", "textarea").fill("这是只用于界面测试的脱敏人格。")
+    field(persona_form, "聊天内容模板", "textarea").fill("[{{time}}] {{role}}：{{message}}")
+    page.get_by_role("button", name="快捷短语", exact=True).click()
+    field(persona_form, "快捷短语", "textarea").fill("继续说下去\n帮我整理成清单")
+    page.get_by_role("button", name="自定义请求", exact=True).click()
+    field(persona_form, "自定义 Header", "textarea").fill('{"X-Persona":"safe"}')
+    field(persona_form, "自定义 Body", "textarea").fill('{"safe":true}')
+    page.get_by_role("button", name="正则替换", exact=True).click()
+    field(persona_form, "正则规则", "textarea").fill('[{"pattern":"foo","replacement":"bar","flags":"g","target":"assistant"}]')
+    page.get_by_role("button", name="记忆", exact=True).click()
+    field(persona_form, "摘要更新频率", "input").fill("12")
+    set_switch(page, "参考历史聊天记录", False)
+    page.get_by_role("button", name="MCP", exact=True).click()
+    field(persona_form, "绑定 MCP 服务", "textarea").fill("safe-mcp")
     persona_form.get_by_role("button", name="保存人格").click()
-    page.get_by_text("人格已保存", exact=True).wait_for()
+    page.get_by_text(f"已保存「{persona_name}」", exact=True).wait_for()
+    persona_card = card(page, f"● {persona_name}")
+    persona_card.get_by_role("button", name="编辑").click()
+    field(persona_form, "助手名称", "input").fill(edited_persona_name)
+    persona_form.get_by_role("button", name="保存修改").click()
+    page.get_by_text(f"已保存「{edited_persona_name}」", exact=True).wait_for()
+    page.screenshot(path=artifacts / "settings-persona-desktop.png", full_page=True)
+
+    page.get_by_role("button", name="世界书", exact=True).click()
+    delete_worldbook_card = card(page, seed_worldbook_name)
+    delete_worldbook_card.get_by_role("button", name="删除").click()
+    wait_card_gone(page, seed_worldbook_name)
+    page.get_by_role("button", name="添加世界书").click()
+    worldbook_form = page.locator("form.worldbook-form")
+    field(worldbook_form, "名称", "input").fill(worldbook_name)
+    field(worldbook_form, "简介", "input").fill("脱敏世界书功能验证")
+    worldbook_form.get_by_role("button", name="添加条目").click()
+    entry_form = page.locator("form.entry-editor")
+    field(entry_form, "条目名称", "input").fill("港口规则")
+    field(entry_form, "内容", "textarea").fill("雾港在夜里关闭北门。")
+    entry_form.get_by_text("常驻激活", exact=True).click()
+    field(entry_form, "关键词", "textarea").fill("雾港\n北门")
+    entry_form.get_by_text("使用正则", exact=True).click()
+    field(entry_form, "扫描深度", "input").fill("8")
+    field(entry_form, "注入位置", "select").select_option("history_before")
+    field(entry_form, "注入角色", "select").select_option("assistant")
+    field(entry_form, "优先级", "input").fill("9")
+    entry_form.get_by_role("button", name="保存条目").click()
+    worldbook_form.get_by_text("港口规则", exact=True).wait_for()
+    worldbook_form.get_by_role("button", name="保存世界书").click()
+    page.get_by_text("世界书已保存", exact=True).wait_for()
+    worldbook_card = card(page, worldbook_name)
+    worldbook_card.get_by_text("1 个条目", exact=False).wait_for()
+    worldbook_card.get_by_role("button", name="编辑").click()
+    worldbook_form = page.locator("form.worldbook-form")
+    field(worldbook_form, "简介", "input").fill("已经完成编辑验证")
+    worldbook_form.get_by_role("button", name="保存世界书").click()
+    page.get_by_text("世界书修改已保存", exact=True).wait_for()
+
+    with page.expect_download() as download_info:
+        page.get_by_role("button", name="导出", exact=True).click()
+    assert download_info.value.suggested_filename.startswith("atherloom-worldbooks-")
+
+    import_file = artifacts / "worldbook-import-e2e.json"
+    import_file.write_text(json.dumps({
+        "format": "atherloom-worldbooks",
+        "version": 1,
+        "worldbooks": [{"name": imported_worldbook_name, "description": "导入后删除", "enabled": True, "entries": []}],
+    }, ensure_ascii=False), encoding="utf-8")
+    page.locator('input[type="file"][accept*="json"]').set_input_files(import_file)
+    page.locator("article.settings-list-card .settings-list-copy > strong").get_by_text(imported_worldbook_name, exact=True).wait_for()
+    imported_card = card(page, imported_worldbook_name)
+    imported_card.wait_for()
+    imported_card.get_by_role("button", name="删除").click()
+    wait_card_gone(page, imported_worldbook_name)
+    page.screenshot(path=artifacts / "settings-worldbook-desktop.png", full_page=True)
 
     page.get_by_role("button", name="外观", exact=True).click()
     swatches = page.locator(".theme-swatches")
@@ -74,64 +302,44 @@ with sync_playwright() as playwright:
     }
     for label, (theme_name, background, accent) in expected_themes.items():
         swatches.get_by_role("button", name=label, exact=True).click()
-        theme_metrics = page.evaluate("""() => ({
+        metrics = page.evaluate("""() => ({
           name: document.documentElement.dataset.theme,
           background: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(),
           accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),
         })""")
-        assert theme_metrics == {"name": theme_name, "background": background, "accent": accent}, theme_metrics
-
-    page.emulate_media(color_scheme="dark")
-    swatches.get_by_role("button", name="跟随系统", exact=True).click()
-    system_dark = page.evaluate("""() => ({
-      name: document.documentElement.getAttribute('data-theme'),
-      background: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(),
-    })""")
-    assert system_dark == {"name": None, "background": "#24231f"}, system_dark
-    page.emulate_media(color_scheme="light")
-    system_light = page.evaluate("""() => ({
-      name: document.documentElement.getAttribute('data-theme'),
-      background: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(),
-    })""")
-    assert system_light == {"name": None, "background": "#f7f6f2"}, system_light
+        assert metrics == {"name": theme_name, "background": background, "accent": accent}, metrics
     swatches.get_by_role("button", name="浅色", exact=True).click()
-    page.screenshot(path=artifacts / "theme-palette.png", full_page=True)
-    page.get_by_role("button", name="关闭设置").click()
 
-    composer = page.get_by_role("textbox", name="消息")
-    composer.fill("请介绍这个 React 首版。")
-    page.get_by_role("button", name="发送").click()
-    page.get_by_text("Atherloom React", exact=False).wait_for()
-    page.locator(".conversation-title").get_by_text("React 首版验证", exact=True).wait_for()
-    page.screenshot(path=artifacts / "react-desktop.png", full_page=True)
-
+    page.get_by_role("button", name="API 与网关", exact=True).click()
+    provider_card = card(page, provider_name)
+    provider_card.get_by_role("button", name="编辑").click()
     page.set_viewport_size({"width": 390, "height": 844})
-    page.wait_for_timeout(250)
-    page.get_by_role("button", name="打开菜单").click()
-    page.locator(".sidebar").wait_for(state="visible")
-    page.locator(".sidebar").get_by_text("React 首版验证", exact=True).wait_for()
-    page.get_by_role("button", name="关闭侧栏").click()
+    page.locator(".settings-content").evaluate("node => { node.scrollTop = 0; }")
     page.wait_for_timeout(250)
     mobile_metrics = page.evaluate("""() => {
-      const main = document.querySelector('.main').getBoundingClientRect();
-      const sidebar = document.querySelector('.sidebar').getBoundingClientRect();
+      const input = document.querySelector('.settings-edit-card input');
+      const heading = document.querySelector('.settings-section h3');
       return {
         innerWidth: window.innerWidth,
         clientWidth: document.documentElement.clientWidth,
         scrollWidth: document.documentElement.scrollWidth,
-        mainLeft: Math.round(main.left),
-        mainWidth: Math.round(main.width),
-        sidebarRight: Math.round(sidebar.right),
+        inputWeight: getComputedStyle(input).fontWeight,
+        inputSize: getComputedStyle(input).fontSize,
+        headingFamily: getComputedStyle(heading).fontFamily,
       };
     }""")
-    assert mobile_metrics == {
-        "innerWidth": 390,
-        "clientWidth": 390,
-        "scrollWidth": 390,
-        "mainLeft": 0,
-        "mainWidth": 390,
-        "sidebarRight": 0,
-    }, mobile_metrics
+    assert mobile_metrics["innerWidth"] == mobile_metrics["clientWidth"] == mobile_metrics["scrollWidth"] == 390, mobile_metrics
+    assert mobile_metrics["inputWeight"] == "400", mobile_metrics
+    assert mobile_metrics["inputSize"] == "14px", mobile_metrics
+    assert "Georgia" in mobile_metrics["headingFamily"], mobile_metrics
+    page.screenshot(path=artifacts / "settings-api-mobile.png", full_page=True)
+    page.get_by_role("button", name="关闭设置").click()
+
+    composer = page.get_by_role("textbox", name="消息")
+    composer.fill("请介绍这个 React 设置迁移版。")
+    page.get_by_role("button", name="发送").click()
+    page.get_by_text("Atherloom React", exact=False).wait_for()
+    page.locator(".conversation-title").get_by_text("React 设置验证", exact=True).wait_for()
     page.screenshot(path=artifacts / "react-mobile.png", full_page=True)
 
     browser.close()
@@ -140,9 +348,15 @@ with sync_playwright() as playwright:
         raise AssertionError("Browser console errors:\n" + "\n".join(console_errors))
 
 print(json.dumps({
-    "desktop": str(artifacts / "react-desktop.png"),
-    "mobile": str(artifacts / "react-mobile.png"),
-    "themes": str(artifacts / "theme-palette.png"),
+    "settings_api_desktop": str(artifacts / "settings-api-desktop.png"),
+    "launch_animation": str(artifacts / "launch-animation.png"),
+    "settings_persona_desktop": str(artifacts / "settings-persona-desktop.png"),
+    "settings_worldbook_desktop": str(artifacts / "settings-worldbook-desktop.png"),
+    "settings_api_mobile": str(artifacts / "settings-api-mobile.png"),
     "mobile_metrics": mobile_metrics,
-    "checks": ["bootstrap", "backend address validation", "provider", "persona", "seven theme modes", "conversation", "chat stream", "markdown", "mobile sidebar"],
+    "checks": [
+        "provider create/edit/delete", "saved key preservation", "model fetch and native select", "provider test",
+        "vision route", "persona eight panes/create/edit/delete", "worldbook entry/create/edit/delete/import/export",
+        "seven themes", "old typography", "old launch animation", "mobile width", "chat stream",
+    ],
 }, ensure_ascii=False, indent=2))

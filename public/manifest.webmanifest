@@ -6,10 +6,14 @@
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
   "orientation": "any",
   "background_color": "#f7f6f2",
   "theme_color": "#f7f6f2",
+  "categories": ["productivity", "utilities", "entertainment"],
   "icons": [
-    { "src": "app-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "app-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "app-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" },
+    { "src": "app-icon-monochrome.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "monochrome" }
   ]
 }

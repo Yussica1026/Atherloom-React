@@ -1,0 +1,15 @@
+{
+  "id": "./",
+  "name": "Atherloom · 心织域",
+  "short_name": "Atherloom",
+  "description": "本地优先、支持人格与记忆的私人 AI 客户端",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f7f6f2",
+  "theme_color": "#f7f6f2",
+  "icons": [
+    { "src": "app-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

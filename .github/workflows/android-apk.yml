@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [feat/android-apk]
+    tags: ["v*"]
     paths:
       - "android/**"
       - "src/**"
@@ -16,7 +17,7 @@ on:
       - ".github/workflows/android-apk.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -52,6 +53,12 @@ jobs:
           "$APKSIGNER" verify --verbose --print-certs "$APK" | tee android/apk-signature.txt
           "$AAPT" dump badging "$APK" | tee android/apk-badging.txt
           grep -Fq "package: name='app.atherloom.react'" android/apk-badging.txt
+      - name: Prepare release asset
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk Atherloom-React-Android-debug.apk
+          sha256sum Atherloom-React-Android-debug.apk > Atherloom-React-Android-debug.apk.sha256
       - uses: actions/upload-artifact@v7
         with:
           name: Atherloom-React-Android-debug
@@ -60,3 +67,15 @@ jobs:
             android/apk-signature.txt
             android/apk-badging.txt
           if-no-files-found: error
+      - name: Publish private GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            Atherloom-React-Android-debug.apk \
+            Atherloom-React-Android-debug.apk.sha256 \
+            android/apk-signature.txt \
+            android/apk-badging.txt \
+            --title "Atherloom React $GITHUB_REF_NAME" \
+            --notes "Atherloom React Android 首个测试版。独立包名 app.atherloom.react，不会覆盖旧版。首次打开后请在设置中填写可访问的 FastAPI 后端地址。当前使用 Debug 签名，仅用于安装测试。"

@@ -11,6 +11,7 @@ interface AtherloomNativeBridge {
   listProviders?(): string;
   deleteProvider?(id: string): string;
   providerOperationAsync?(operation: string, raw: string, callbackId: string): void;
+  providerChatStream?(raw: string, callbackId: string): void;
   saveFile?(fileName: string, mimeType: string, base64: string, callbackId: string): void;
   chatStream(path: string, body: string, callbackId: string): void;
   cancelStream(callbackId: string): void;

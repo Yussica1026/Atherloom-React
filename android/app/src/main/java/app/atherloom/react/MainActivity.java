@@ -324,6 +324,11 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void providerChatStream(String raw, String callbackId) {
+            new Thread(() -> runProviderChatStream(raw, callbackId), "atherloom-provider-stream").start();
+        }
+
+        @JavascriptInterface
         public String apiRequest(String method, String path, String body) {
             HttpURLConnection connection = null;
             try {
@@ -531,7 +536,19 @@ public class MainActivity extends Activity {
                 String content = "";
                 String reasoning = "";
                 if ("anthropic".equals(protocol)) {
-                    content = textValue(data.opt("content"));
+                    JSONArray blocks = data.optJSONArray("content");
+                    StringBuilder text = new StringBuilder();
+                    StringBuilder thought = new StringBuilder();
+                    if (blocks != null) {
+                        for (int index = 0; index < blocks.length(); index++) {
+                            JSONObject block = blocks.optJSONObject(index);
+                            if (block == null) continue;
+                            if ("thinking".equals(block.optString("type"))) thought.append(block.optString("thinking"));
+                            else if ("text".equals(block.optString("type"))) text.append(block.optString("text"));
+                        }
+                    }
+                    content = text.toString();
+                    reasoning = thought.toString();
                 } else {
                     JSONArray choices = data.optJSONArray("choices");
                     JSONObject choice = choices == null || choices.length() == 0 ? null : choices.optJSONObject(0);
@@ -557,6 +574,129 @@ public class MainActivity extends Activity {
             }
         }
 
+        private void runProviderChatStream(String raw, String callbackId) {
+            HttpURLConnection connection = null;
+            try {
+                JSONObject request = new JSONObject(raw == null || raw.isEmpty() ? "{}" : raw);
+                JSONObject provider = providerFromRequest(request);
+                String protocol = provider.optString("protocol", "openai");
+                String base = provider.getString("base_url").replaceAll("/+$", "")
+                    .replaceAll("/chat/completions$", "")
+                    .replaceAll("/messages$", "")
+                    .replaceAll("/models$", "");
+                String endpoint = "anthropic".equals(protocol)
+                    ? (base.endsWith("/v1") ? base + "/messages" : base + "/v1/messages")
+                    : (base.matches("https?://api\\.openai\\.com") ? base + "/v1/chat/completions" : base + "/chat/completions");
+                JSONArray messages = request.optJSONArray("messages");
+                if (messages == null) messages = new JSONArray();
+                JSONObject payload = new JSONObject()
+                    .put("model", provider.getString("model"))
+                    .put("max_tokens", request.optInt("max_tokens", provider.optInt("max_tokens", 4096)))
+                    .put("temperature", request.optDouble("temperature", provider.optDouble("temperature", 0.7)))
+                    .put("top_p", request.optDouble("top_p", provider.optDouble("top_p", 1.0)))
+                    .put("stream", true)
+                    .put("messages", messages);
+                JSONObject customBody = request.optJSONObject("custom_body");
+                if (customBody != null) {
+                    for (Iterator<String> keys = customBody.keys(); keys.hasNext();) {
+                        String key = keys.next();
+                        if ("model".equals(key) || "messages".equals(key) || "stream".equals(key)) continue;
+                        payload.put(key, customBody.get(key));
+                    }
+                }
+                String system = request.optString("system");
+                if ("anthropic".equals(protocol)) {
+                    if (!system.isEmpty()) payload.put("system", system);
+                } else if (!system.isEmpty()) {
+                    JSONArray withSystem = new JSONArray().put(new JSONObject().put("role", "system").put("content", system));
+                    for (int index = 0; index < messages.length(); index++) withSystem.put(messages.get(index));
+                    payload.put("messages", withSystem);
+                }
+                if ("glm".equals(protocol) && request.optBoolean("thinking_enabled", provider.optBoolean("thinking_enabled", true))) {
+                    payload.put("thinking", new JSONObject().put("type", "enabled"));
+                }
+
+                connection = (HttpURLConnection) new URL(endpoint).openConnection();
+                streams.put(callbackId, connection);
+                connection.setRequestMethod("POST");
+                connection.setConnectTimeout(25000);
+                connection.setReadTimeout(180000);
+                connection.setDoOutput(true);
+                connection.setRequestProperty("Accept", "text/event-stream");
+                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                applyProviderHeaders(connection, provider);
+                JSONObject customHeaders = request.optJSONObject("custom_headers");
+                if (customHeaders != null) {
+                    for (Iterator<String> keys = customHeaders.keys(); keys.hasNext();) {
+                        String header = keys.next();
+                        if ("authorization".equalsIgnoreCase(header) || "x-api-key".equalsIgnoreCase(header)
+                            || "content-type".equalsIgnoreCase(header)) continue;
+                        connection.setRequestProperty(header, customHeaders.optString(header));
+                    }
+                }
+                try (OutputStream output = connection.getOutputStream()) {
+                    output.write(payload.toString().getBytes(StandardCharsets.UTF_8));
+                }
+                int status = connection.getResponseCode();
+                if (status >= 400) throw new Exception(httpError(status, read(connection.getErrorStream())));
+
+                JSONObject usage = new JSONObject();
+                String responseModel = provider.optString("model");
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null && !cancelledStreams.contains(callbackId)) {
+                        String eventText = line.trim();
+                        if (eventText.isEmpty() || eventText.startsWith(":")) continue;
+                        if (eventText.startsWith("event:")) continue;
+                        if (eventText.startsWith("data:")) eventText = eventText.substring(5).trim();
+                        if (eventText.isEmpty() || "[DONE]".equals(eventText)) continue;
+                        JSONObject event = new JSONObject(eventText);
+                        if (!event.optString("model").isEmpty()) responseModel = event.optString("model");
+                        JSONObject eventUsage = event.optJSONObject("usage");
+                        JSONObject message = event.optJSONObject("message");
+                        if (eventUsage == null && message != null) eventUsage = message.optJSONObject("usage");
+                        if (eventUsage != null) {
+                            for (Iterator<String> keys = eventUsage.keys(); keys.hasNext();) {
+                                String key = keys.next();
+                                usage.put(key, eventUsage.get(key));
+                            }
+                        }
+                        JSONObject output = new JSONObject();
+                        if ("anthropic".equals(protocol)) {
+                            JSONObject delta = event.optJSONObject("delta");
+                            if (delta != null && "content_block_delta".equals(event.optString("type"))) {
+                                String text = nullableString(delta, "text");
+                                String thinking = nullableString(delta, "thinking");
+                                if (!text.isEmpty()) output.put("delta", text);
+                                if (!thinking.isEmpty()) output.put("reasoning_delta", thinking);
+                            }
+                        } else {
+                            JSONArray choices = event.optJSONArray("choices");
+                            JSONObject choice = choices != null && choices.length() > 0 ? choices.optJSONObject(0) : null;
+                            JSONObject delta = choice == null ? null : choice.optJSONObject("delta");
+                            String text = nullableString(delta, "content");
+                            String reasoning = nullableString(delta, "reasoning_content");
+                            if (reasoning.isEmpty()) reasoning = nullableString(delta, "reasoning");
+                            if (!text.isEmpty()) output.put("delta", text);
+                            if (!reasoning.isEmpty()) output.put("reasoning_delta", reasoning);
+                        }
+                        if (output.length() > 0) emit(callbackId, output.toString());
+                    }
+                }
+                if (!cancelledStreams.contains(callbackId)) {
+                    JSONObject done = new JSONObject().put("done", true).put("model", responseModel);
+                    if (usage.length() > 0) done.put("usage", usage);
+                    emit(callbackId, done.toString());
+                }
+            } catch (Exception error) {
+                if (!cancelledStreams.contains(callbackId)) emit(callbackId, failurePayload(error.getMessage()));
+            } finally {
+                streams.remove(callbackId);
+                cancelledStreams.remove(callbackId);
+                if (connection != null) connection.disconnect();
+            }
+        }
+
         private static String textValue(Object value) {
             if (value == null || value == JSONObject.NULL) return "";
             if (value instanceof String) return (String) value;
@@ -572,6 +712,10 @@ public class MainActivity extends Activity {
                 return output.toString();
             }
             return String.valueOf(value);
+        }
+
+        private static String nullableString(JSONObject object, String key) {
+            return object == null || !object.has(key) || object.isNull(key) ? "" : object.optString(key, "");
         }
 
         private static String successResult(Object body) throws Exception {

@@ -238,6 +238,28 @@ export function Sidebar({
           <PlusIcon />
           新对话
         </button>
+        <nav className="sidebar-feature-list" aria-label="功能空间">
+          <button type="button" onClick={() => onOpenSpace("favorites")}><span aria-hidden="true">☆</span>珍藏</button>
+          <button type="button" onClick={() => onOpenSpace("life")}><span aria-hidden="true">▥</span>生活簿</button>
+          <button type="button" onClick={() => onOpenSpace("correspondence")}><span aria-hidden="true">✉</span>往来</button>
+          <details className="sidebar-hub">
+            <summary><span aria-hidden="true">⌘</span><strong>共创空间</strong><i aria-hidden="true">⌄</i></summary>
+            <div className="sidebar-hub-panel">
+              <button type="button" onClick={() => onOpenSpace("reading")}><span>▤</span><span><strong>一起读书</strong><small>书签、批注与 AI 陪读</small></span></button>
+              <button type="button" onClick={() => onOpenSpace("cinema")}><span>▷</span><span><strong>一起看电影</strong><small>本地影片与字幕陪看</small></span></button>
+              <button type="button" onClick={() => onOpenSpace("listening")}><span>♪</span><span><strong>一起听歌</strong><small>本地音频、歌词与陪听</small></span></button>
+              <button type="button" onClick={() => onOpenSpace("roleplay")}><span>⌘</span><span><strong>角色剧场</strong><small>旁白、世界书与故事存档</small></span></button>
+            </div>
+          </details>
+          <details className="sidebar-hub">
+            <summary><span aria-hidden="true">◇</span><strong>日记与留言</strong><i aria-hidden="true">⌄</i></summary>
+            <div className="sidebar-hub-panel">
+              <button type="button" onClick={() => onOpenSpace("journal")}><span>▱</span><span><strong>日记</strong><small>私人、共享与 AI 日记</small></span></button>
+              <button type="button" onClick={() => onOpenSpace("board")}><span>□</span><span><strong>留言板</strong><small>写给当前人格的便利贴</small></span></button>
+              <button type="button" onClick={() => onOpenSpace("dream")}><span>☾</span><span><strong>梦库</strong><small>做梦、隔离与认领梦境</small></span></button>
+            </div>
+          </details>
+        </nav>
       </div>
 
       <nav className="sidebar-personas" aria-label="人格工作区">
@@ -250,26 +272,6 @@ export function Sidebar({
           </button>
         ))}
       </nav>
-
-      <div className="sidebar-spaces">
-        <div className="sidebar-space-primary">
-          <button type="button" onClick={() => onOpenSpace("favorites")}>☆ 珍藏</button>
-          <button type="button" onClick={() => onOpenSpace("life")}>▥ 生活簿</button>
-          <button type="button" onClick={() => onOpenSpace("correspondence")}>✉ 往来</button>
-        </div>
-        <details>
-          <summary>共享与创作空间</summary>
-          <div>
-            <button type="button" onClick={() => onOpenSpace("reading")}>▤ 一起读书</button>
-            <button type="button" onClick={() => onOpenSpace("cinema")}>▷ 一起看电影</button>
-            <button type="button" onClick={() => onOpenSpace("listening")}>♪ 一起听歌</button>
-            <button type="button" onClick={() => onOpenSpace("roleplay")}>⌘ 角色剧场</button>
-            <button type="button" onClick={() => onOpenSpace("journal")}>▱ 日记</button>
-            <button type="button" onClick={() => onOpenSpace("board")}>□ 留言板</button>
-            <button type="button" onClick={() => onOpenSpace("dream")}>☾ 梦库</button>
-          </div>
-        </details>
-      </div>
 
       <label className="sidebar-search">
         <SearchIcon />
@@ -303,7 +305,7 @@ export function Sidebar({
       </nav>
 
       <button className="profile-row" type="button" onClick={onOpenSettings} aria-label="打开设置">
-        <span className="avatar">{(displayName || "A").slice(0, 1).toUpperCase()}</span>
+        <span className="avatar">{displayName ? displayName.slice(0, 1).toUpperCase() : "·"}</span>
         <span className="profile-copy"><strong>{displayName || "设置用户名"}</strong><small>线路、人格、备份与外观</small></span>
         <span aria-hidden="true">•••</span>
       </button>

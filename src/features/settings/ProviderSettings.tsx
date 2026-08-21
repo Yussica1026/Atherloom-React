@@ -343,7 +343,7 @@ export function ProviderSettings({
           <label className="span-all">自定义请求头（JSON）<textarea rows={4} value={draft.custom_headers} onChange={(event) => updateDraft("custom_headers", event.target.value)} placeholder={'{"X-Custom-Header":"value"}'} /></label>
           {draft.cache_mode === "auto" || draft.cache_mode === "anthropic" ? <label className="check-row span-all"><input type="checkbox" checked={draft.prompt_cache} onChange={(event) => updateDraft("prompt_cache", event.target.checked)} /><span>允许显式写入提示词缓存</span></label> : null}
           <label className="check-row span-all"><input type="checkbox" checked={draft.thinking_enabled} onChange={(event) => updateDraft("thinking_enabled", event.target.checked)} /><span>显示模型返回的思考过程（线路支持时）</span></label>
-          <label className="check-row span-all"><input type="checkbox" checked={draft.stream_enabled} onChange={(event) => updateDraft("stream_enabled", event.target.checked)} /><span>流式输出<small>开启后，回复会边生成边显示。</small></span></label>
+          <label>输出方式<select value={draft.stream_enabled ? "stream" : "complete"} onChange={(event) => updateDraft("stream_enabled", event.target.value === "stream")}><option value="stream">流式 · 边生成边显示</option><option value="complete">非流式 · 完成后一次显示</option></select><small>两种方式都保留思考过程与 Token 数据；线路必须支持对应协议。</small></label>
           <label className="check-row span-all"><input type="checkbox" checked={draft.enabled} onChange={(event) => updateDraft("enabled", event.target.checked)} /><span>启用这条线路</span></label>
           <p className="form-status span-all" aria-live="polite">{status}</p>
           <div className="form-actions">

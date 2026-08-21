@@ -122,10 +122,16 @@ export function SettingsPanel({
   const [tab, setTab] = useState<SettingsTab>("providers");
   const [connectionStatus, setConnectionStatus] = useState("");
   const [apiBaseDraft, setApiBaseDraft] = useState(apiBase);
+  const [displayNameDraft, setDisplayNameDraft] = useState(String(settings.display_name || ""));
+  const [appearanceStatus, setAppearanceStatus] = useState("");
 
   useEffect(() => {
-    if (open) setApiBaseDraft(apiBase);
-  }, [apiBase, open]);
+    if (open) {
+      setApiBaseDraft(apiBase);
+      setDisplayNameDraft(String(settings.display_name || ""));
+      setAppearanceStatus("");
+    }
+  }, [apiBase, open, settings.display_name]);
 
   useEffect(() => {
     if (!open) return;
@@ -222,8 +228,12 @@ export function SettingsPanel({
               <div className="section-heading"><h3>外观</h3><p>跟随系统保留最初的暖米白与暖黑灰；水色、薄荷、丁香和腮红只是可选配色。</p></div>
               <label className="theme-setting">主题<select value={theme} onChange={(event) => onThemeChange(event.target.value as ThemeName)}>{themes.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
               <div className="theme-swatches">{themes.map((item) => <button type="button" key={item.value} className={`theme-swatch swatch-${item.value}${theme === item.value ? " active" : ""}`} onClick={() => onThemeChange(item.value)}><span /><strong>{item.label}</strong></button>)}</div>
+              <form className="appearance-name-editor" onSubmit={(event) => { event.preventDefault(); setAppearanceStatus("正在保存用户名…"); void onSettingsChange({ display_name: displayNameDraft.trim() }).then(() => setAppearanceStatus("用户名已保存")).catch((error) => setAppearanceStatus(error instanceof Error ? error.message : "用户名保存失败")); }}>
+                <label>用户名<input maxLength={40} value={displayNameDraft} onChange={(event) => setDisplayNameDraft(event.target.value)} placeholder="输入侧栏显示名称" /></label>
+                <button className="primary-button">保存用户名</button>
+                <p className="form-status" aria-live="polite">{appearanceStatus}</p>
+              </form>
               <div className="appearance-options">
-                <label>用户名<input maxLength={40} defaultValue={String(settings.display_name || "")} onBlur={(event) => void onSettingsChange({ display_name: event.target.value.trim() })} /></label>
                 <label>字体大小 <small>{Math.round(Number(settings.font_scale || 100) > 5 ? Number(settings.font_scale || 100) : Number(settings.font_scale || 1) * 100)}%</small><input type="range" min="85" max="130" step="5" value={Math.round(Number(settings.font_scale || 100) > 5 ? Number(settings.font_scale || 100) : Number(settings.font_scale || 1) * 100)} onChange={(event) => void onSettingsChange({ font_scale: Number(event.target.value) })} /></label>
                 <label>消息密度<select defaultValue={String(settings.message_density || "comfortable")} onChange={(event) => void onSettingsChange({ message_density: event.target.value as AppSettings["message_density"] })}><option value="compact">紧凑</option><option value="comfortable">舒适</option><option value="relaxed">宽松</option></select></label>
                 <label>流式出字速度<select defaultValue={String(settings.stream_speed || "standard")} onChange={(event) => void onSettingsChange({ stream_speed: event.target.value })}><option value="slow">慢速</option><option value="standard">标准</option><option value="fast">快速</option></select></label>

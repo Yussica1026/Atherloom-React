@@ -70,6 +70,11 @@ function errorText(error: unknown) {
   return error instanceof Error ? error.message : "操作失败";
 }
 
+function ReasoningDetails({ content }: { content: string }) {
+  const [open, setOpen] = useState(true);
+  return <details className="reasoning" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}><summary>{open ? "思考过程（点击收起）" : "思考过程（点击展开）"}</summary><p>{content}</p></details>;
+}
+
 export function MessageList({
   messages,
   favoriteMessageIds,
@@ -135,10 +140,7 @@ export function MessageList({
             <div className="message-column">
               <div className="message-body">
                 {message.reasoning ? (
-                  <details className="reasoning">
-                    <summary>思考过程</summary>
-                    <p>{message.reasoning}</p>
-                  </details>
+                  <ReasoningDetails content={message.reasoning} />
                 ) : null}
                 {message.attachments?.length ? (
                   <div className="message-attachments" aria-label="消息附件">

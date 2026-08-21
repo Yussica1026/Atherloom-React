@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { getApiBase, setApiBase } from "../adapters/fastapi/client";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { fastApi, getApiBase, setApiBase } from "../adapters/fastapi/client";
 import { saveFile } from "../adapters/native/files";
 import { MenuIcon, SparkIcon } from "../components/Icons";
-import { isThemeName, type Attachment, type Message, type ThemeName } from "../domain/types";
+import { isThemeName, type Attachment, type Message, type MotivationPayload, type ThemeName } from "../domain/types";
 import { Composer } from "../features/chat/Composer";
 import { MessageList } from "../features/chat/MessageList";
 import { VoiceCall } from "../features/chat/VoiceCall";
@@ -13,6 +13,7 @@ import { useWorkspace } from "../features/workspace/useWorkspace";
 import "./styles.css";
 
 const themeKey = "atherloom-react:theme";
+const driveLabels: Record<string, string> = { connection: "联结", curiosity: "好奇", reflection: "反思", duty: "责任", social: "交流", fatigue: "疲劳", closeness: "亲近", stress: "压力", joy: "愉悦" };
 
 function worldbookSelectionKey(conversationId: string | null) {
   return `atherloom-react:worldbooks:${conversationId || "__new__"}`;
@@ -69,6 +70,10 @@ export default function App() {
   const [compressProviderId, setCompressProviderId] = useState("");
   const [compressStatus, setCompressStatus] = useState("");
   const [compressBusy, setCompressBusy] = useState(false);
+  const [chatStatusOpen, setChatStatusOpen] = useState(false);
+  const [motivation, setMotivation] = useState<MotivationPayload | null>(null);
+  const [motivationStatus, setMotivationStatus] = useState("");
+  const [streamModeStatus, setStreamModeStatus] = useState("");
   const [theme, setTheme] = useState<ThemeName>(() => {
     const stored = localStorage.getItem(themeKey);
     return isThemeName(stored) ? stored : "system";
@@ -104,6 +109,7 @@ export default function App() {
       if (callOpen) setCallOpen(false);
       else if (compressOpen) setCompressOpen(false);
       else if (featureSpace) setFeatureSpace(null);
+      else if (chatStatusOpen) setChatStatusOpen(false);
       else if (settingsOpen) setSettingsOpen(false);
       else if (sidebarOpen) setSidebarOpen(false);
       else return;
@@ -111,7 +117,23 @@ export default function App() {
     };
     window.addEventListener("atherloom:back", handleBack);
     return () => window.removeEventListener("atherloom:back", handleBack);
-  }, [callOpen, compressOpen, featureSpace, settingsOpen, sidebarOpen]);
+  }, [callOpen, chatStatusOpen, compressOpen, featureSpace, settingsOpen, sidebarOpen]);
+
+  useEffect(() => {
+    if (!chatStatusOpen) return;
+    let active = true;
+    setMotivationStatus("正在读取当前人格状态…");
+    void fastApi.getMotivation(workspace.personaId || "__default__").then((payload) => {
+      if (!active) return;
+      setMotivation(payload);
+      setMotivationStatus("");
+    }).catch((error) => {
+      if (!active) return;
+      setMotivation(null);
+      setMotivationStatus(error instanceof Error ? error.message : "欲望状态读取失败");
+    });
+    return () => { active = false; };
+  }, [chatStatusOpen, workspace.busy, workspace.personaId]);
 
   useEffect(() => {
     const container = chatRef.current;
@@ -129,6 +151,12 @@ export default function App() {
       setSelectedWorldbookIds([]);
     }
   }, [workspace.currentId, workspace.personaId]);
+
+  useEffect(() => {
+    if (!attachmentStatus) return;
+    const timer = window.setTimeout(() => setAttachmentStatus(""), 6_000);
+    return () => window.clearTimeout(timer);
+  }, [attachmentStatus]);
 
   useEffect(() => {
     const normalized = query.trim();
@@ -274,6 +302,18 @@ export default function App() {
     () => new Set(workspace.favorites.filter((item) => (item.owners || []).includes("user")).map((item) => item.source_message_id)),
     [workspace.favorites],
   );
+  const currentProvider = workspace.providers.find((item) => item.id === workspace.providerId) || null;
+  const prominentDrives = Object.entries(motivation?.state.drives || {}).sort((left, right) => right[1] - left[1]).slice(0, 4);
+
+  const changeStreamMode = async (enabled: boolean) => {
+    setStreamModeStatus("正在保存输出方式…");
+    try {
+      await workspace.setProviderStreamMode(enabled);
+      setStreamModeStatus(enabled ? "已切换为流式输出" : "已切换为非流式输出");
+    } catch (error) {
+      setStreamModeStatus(error instanceof Error ? error.message : "输出方式保存失败");
+    }
+  };
 
   const chooseQuestionOption = (question: string, option: string) => {
     const prefix = `关于「${question}」，我的选择是：`;
@@ -333,8 +373,16 @@ export default function App() {
         <header className="topbar">
           <button className="mobile-menu" type="button" aria-label="打开菜单" onClick={() => setSidebarOpen(true)}><MenuIcon /></button>
           <div className="conversation-title"><strong>{workspace.currentConversation?.title || "新对话"}</strong><small>{workspace.busy ? "正在生成" : "就绪"} · {workspace.personas.find((item) => item.id === workspace.personaId)?.name || "默认人格"} · {workspace.providers.find((item) => item.id === workspace.providerId)?.model || "未选模型"}</small></div>
-          <div className="topbar-actions"><button className="topbar-action" type="button" title="导出脱敏 Markdown" aria-label="导出脱敏 Markdown" onClick={() => void exportConversationMarkdown()}>↓</button><button className="topbar-action" type="button" title="主动压缩对话" aria-label="主动压缩对话" onClick={openCompress}>⇲</button><button className="topbar-action" type="button" title="语音通话" aria-label="语音通话" onClick={() => setCallOpen(true)}>♩</button></div>
+          <div className="topbar-actions"><button className="topbar-action" type="button" title="导出脱敏 Markdown" aria-label="导出脱敏 Markdown" onClick={() => void exportConversationMarkdown()}>↓</button><button className="topbar-action" type="button" title="主动压缩对话" aria-label="主动压缩对话" onClick={openCompress}>⇲</button><button className={`topbar-action${chatStatusOpen ? " active" : ""}`} type="button" title="欲望与聊天状态" aria-label="打开或关闭欲望与聊天状态" aria-expanded={chatStatusOpen} onClick={() => setChatStatusOpen((current) => !current)}>◌</button><button className="topbar-action" type="button" title="语音通话" aria-label="语音通话" onClick={() => setCallOpen(true)}>♩</button></div>
         </header>
+
+        {chatStatusOpen ? <aside className="chat-status-card" aria-label="欲望与聊天状态">
+          <header><div><span>INNER STATE</span><strong>{workspace.personas.find((item) => item.id === workspace.personaId)?.name || "默认人格"} 的状态</strong></div><button type="button" aria-label="关闭欲望状态" onClick={() => setChatStatusOpen(false)}>×</button></header>
+          {prominentDrives.length ? <div className="chat-drive-grid">{prominentDrives.map(([key, value]) => <article key={key}><span>{motivation?.drives?.[key]?.label || driveLabels[key] || key}</span><strong>{Number(value).toFixed(1)}</strong><i style={{ "--drive-value": `${Math.max(0, Math.min(100, Number(value)))}%` } as CSSProperties} /></article>)}</div> : <p className="chat-status-message">{motivationStatus || "当前还没有欲望状态数据"}</p>}
+          <div className="chat-status-facts"><span><small>心跳</small><strong>{motivation?.state.tick_count || 0} 次</strong></span><span><small>模型</small><strong>{currentProvider?.model || "未选择"}</strong></span><span><small>输出</small><strong>{currentProvider?.stream_enabled === false ? "非流式" : "流式"}</strong></span><span><small>思考</small><strong>{currentProvider?.thinking_enabled === false ? "关闭" : "开启"}</strong></span></div>
+          <div className="stream-mode-switch" aria-label="输出方式"><button type="button" className={currentProvider?.stream_enabled !== false ? "active" : ""} disabled={!currentProvider || workspace.busy} onClick={() => void changeStreamMode(true)}>流式</button><button type="button" className={currentProvider?.stream_enabled === false ? "active" : ""} disabled={!currentProvider || workspace.busy} onClick={() => void changeStreamMode(false)}>非流式</button></div>
+          <p className="chat-status-message" aria-live="polite">{streamModeStatus || motivationStatus}</p>
+        </aside> : null}
 
         <section
           className="chat-scroll"
@@ -399,7 +447,7 @@ export default function App() {
           onSend={() => void send()}
           onStop={workspace.stop}
         />
-        {attachmentStatus ? <div className="composer-status" role="alert">{attachmentStatus}</div> : null}
+        {attachmentStatus ? <div className="composer-status" role="alert"><span>{attachmentStatus}</span><button type="button" aria-label="关闭提示" onClick={() => setAttachmentStatus("")}>×</button></div> : null}
       </main>
 
       {compressOpen ? (
@@ -471,6 +519,7 @@ export default function App() {
             return "";
           }
         }}
+        onGeneratePrivateJournal={workspace.generatePrivateJournal}
       />
       <VoiceCall
         open={callOpen}

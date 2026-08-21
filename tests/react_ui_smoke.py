@@ -57,9 +57,23 @@ NATIVE_MOCK = r"""
       }
       setTimeout(() => window.AtherloomNativeRequest(callbackId, JSON.stringify({ok: true, status: 200, body: JSON.stringify(body)})), 20);
     },
-    saveFile: (name, mime, base64, callbackId) => {
-      setTimeout(() => window.AtherloomNativeFile(callbackId, JSON.stringify({ok: true, message: `已保存 ${name}`})), 10);
+    providerChatStream: (raw, callbackId) => {
+      const request = JSON.parse(raw || "{}");
+      chatCount += 1;
+      const content = chatCount === 1
+        ? '这是第一版回答。<questions>[{"question":"你想继续哪个方向？","options":["继续细化","换个角度"]}]</questions>'
+        : `这是第 ${chatCount} 版回答。`;
+      setTimeout(() => window.AtherloomNativeStream(callbackId, JSON.stringify({reasoning_delta: "已完成本机测试思考"})), 10);
+      setTimeout(() => window.AtherloomNativeStream(callbackId, JSON.stringify({delta: content.slice(0, 8)})), 20);
+      setTimeout(() => window.AtherloomNativeStream(callbackId, JSON.stringify({delta: content.slice(8)})), 30);
+      setTimeout(() => window.AtherloomNativeStream(callbackId, JSON.stringify({done: true, model: request.model || "mock-model-pro", usage: {prompt_tokens: 10, completion_tokens: 8, total_tokens: 18}})), 40);
     },
+    saveFile: (name, mime, base64, callbackId) => {
+      const cancelled = Boolean(window.__cancelNextSave);
+      window.__cancelNextSave = false;
+      setTimeout(() => window.AtherloomNativeFile(callbackId, JSON.stringify(cancelled ? {ok: false, error: "已取消保存"} : {ok: true, message: `已保存 ${name}`})), 10);
+    },
+    cancelStream: () => {},
   };
 })();
 """
@@ -140,12 +154,27 @@ def run() -> None:
         page.get_by_role("button", name="保存九维设置").click()
         page.get_by_text("九维状态设置已保存", exact=True).wait_for()
         assert page.locator(".motivation-grid article").count() == 9
+        page.get_by_role("button", name="外观").click()
+        page.get_by_label("用户名").fill("测试用户")
+        page.get_by_role("button", name="保存用户名").click()
+        page.get_by_text("用户名已保存", exact=True).wait_for()
         page.get_by_role("button", name="关闭设置").click()
+
+        page.get_by_role("button", name="打开或关闭欲望与聊天状态").click()
+        page.locator(".chat-status-card").get_by_text("隔离人格 的状态", exact=True).wait_for()
+        page.get_by_role("button", name="非流式", exact=True).click()
+        page.get_by_text("已切换为非流式输出", exact=True).wait_for()
+        page.get_by_role("button", name="流式", exact=True).click()
+        page.get_by_text("已切换为流式输出", exact=True).wait_for()
+        page.get_by_role("button", name="关闭欲望状态").click()
 
         composer = page.get_by_role("textbox", name="消息")
         composer.fill("请给我两个选择")
         page.get_by_role("button", name="发送").click()
         page.get_by_text("这是第一版回答。", exact=False).wait_for()
+        reasoning = page.locator("details.reasoning").last
+        assert reasoning.get_attribute("open") is not None
+        assert "点击收起" in reasoning.inner_text()
         option = page.get_by_role("button", name="继续细化")
         option.click()
         assert option.get_attribute("aria-pressed") == "true"
@@ -179,14 +208,32 @@ def run() -> None:
         page.get_by_role("button", name="保存记录").click()
         page.get_by_text("早餐", exact=True).wait_for()
 
-        page.get_by_role("button", name="一起读书").click()
+        page.locator(".feature-hub-nav").get_by_role("button", name="一起读书").click()
         page.get_by_label("导入 PDF / TXT / Markdown").set_input_files({"name": "sample.txt", "mimeType": "text/plain", "buffer": b"Atherloom local reading smoke text."})
         page.get_by_text("Atherloom local reading smoke text.", exact=False).wait_for()
+        page.get_by_role("button", name="日记", exact=True).click()
+        page.get_by_label("你能否阅读").select_option("visible")
+        page.get_by_role("button", name="让 TA 现在写一篇").click()
+        page.get_by_text("已写完", exact=False).wait_for()
+        page.get_by_text("这是第 3 版回答。", exact=True).wait_for()
+        page.get_by_text("运行审计", exact=False).click()
+        page.get_by_text("写作完成", exact=False).wait_for()
         page.screenshot(path=str(ARTIFACTS / "react-desktop.png"), full_page=True)
 
-        page.get_by_role("button", name="关闭").click()
+        page.get_by_role("button", name="关闭", exact=True).click()
+        page.evaluate("window.__cancelNextSave = true")
+        page.get_by_role("button", name="导出脱敏 Markdown").click()
+        page.get_by_text("导出失败：已取消保存", exact=True).wait_for()
+        page.get_by_role("button", name="关闭提示").click()
+        assert page.get_by_text("导出失败：已取消保存", exact=True).count() == 0
         page.set_viewport_size({"width": 390, "height": 844})
         page.get_by_role("button", name="打开菜单").click()
+        sidebar_features = page.locator(".sidebar-feature-list")
+        assert sidebar_features.get_by_role("button", name="珍藏").is_visible()
+        assert sidebar_features.get_by_role("button", name="生活簿").is_visible()
+        assert sidebar_features.get_by_role("button", name="往来").is_visible()
+        page.wait_for_timeout(260)
+        page.screenshot(path=str(ARTIFACTS / "react-mobile-sidebar.png"), full_page=True)
         page.get_by_role("button", name="打开设置").click()
         page.get_by_role("button", name="API 与网关").click()
         page.get_by_text("本机测试线路", exact=True).wait_for()

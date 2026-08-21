@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { saveFile } from "../../adapters/native/files";
 import type { Favorite, Persona, Worldbook } from "../../domain/types";
 
@@ -6,6 +6,9 @@ export type FeatureSpace = "favorites" | "life" | "correspondence" | "reading" |
 
 interface BaseEntry { id: string; persona_key: string; created_at: string; updated_at: string }
 interface JournalEntry extends BaseEntry { title: string; content: string; space: "private" | "shared" | "ai"; author: "user" | "ai"; visible_to_user: boolean; visible_to_ai: boolean }
+type JournalTrigger = "manual" | "scheduled" | "catch_up";
+interface JournalSchedule extends BaseEntry { enabled: boolean; interval_hours: number; daily_limit: number; visible_to_user: boolean; next_run_at: string; last_run_at?: string; day_key?: string; day_count?: number; guidance: string }
+interface JournalAudit extends BaseEntry { trigger: JournalTrigger; status: "started" | "success" | "failed" | "skipped"; detail: string; journal_id?: string }
 interface BoardEntry extends BaseEntry { content: string; author: "user" | "ai"; visible_to_user: boolean; visible_to_ai: boolean; reply_to?: string }
 interface DreamEntry extends BaseEntry { title: string; content: string; owner: "user" | "ai"; isolated: boolean; claimed: boolean }
 interface LifeEntry extends BaseEntry { kind: string; occurred_at: string; amount?: number; title: string; category: string; note: string; visible_to_ai: boolean }
@@ -17,6 +20,8 @@ interface MediaNote extends BaseEntry { medium: "cinema" | "listening"; title: s
 
 interface SpaceData {
   journals: JournalEntry[];
+  journalSchedules: JournalSchedule[];
+  journalAudit: JournalAudit[];
   board: BoardEntry[];
   dreams: DreamEntry[];
   life: LifeEntry[];
@@ -28,9 +33,11 @@ interface SpaceData {
 }
 
 const storeKey = "atherloom-react:feature-spaces:v1";
-const blankData = (): SpaceData => ({ journals: [], board: [], dreams: [], life: [], contacts: [], mail: [], roleplays: [], books: [], mediaNotes: [] });
+const blankData = (): SpaceData => ({ journals: [], journalSchedules: [], journalAudit: [], board: [], dreams: [], life: [], contacts: [], mail: [], roleplays: [], books: [], mediaNotes: [] });
 const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}-${crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+const localDayKey = (value = new Date()) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+const afterHours = (hours: number) => new Date(Date.now() + Math.max(1, hours) * 60 * 60 * 1000).toISOString();
 
 function readData(): SpaceData {
   try {
@@ -70,6 +77,7 @@ interface FeatureHubProps {
   onOpenFavorite: (conversationId: string) => Promise<void>;
   onUnfavorite: (messageId: string) => Promise<void>;
   onSendToAssistant: (content: string) => Promise<string | undefined>;
+  onGeneratePrivateJournal: (personaKey: string, trigger: JournalTrigger, guidance: string) => Promise<{ title: string; content: string }>;
 }
 
 function timestampLabel(value: string) {
@@ -77,12 +85,19 @@ function timestampLabel(value: string) {
 }
 
 export function FeatureHub(props: FeatureHubProps) {
-  const { open, personaId, personas, worldbooks, favorites, onClose, onChangeSpace, onOpenFavorite, onUnfavorite, onSendToAssistant } = props;
+  const { open, personaId, personas, worldbooks, favorites, onClose, onChangeSpace, onOpenFavorite, onUnfavorite, onSendToAssistant, onGeneratePrivateJournal } = props;
   const [data, setData] = useState<SpaceData>(readData);
   const personaKey = personaId || "__default__";
   const personaName = personas.find((item) => item.id === personaId)?.name || "默认人格";
+  const dataRef = useRef(data);
+  const generatorRef = useRef(onGeneratePrivateJournal);
+  const journalRunningRef = useRef(new Set<string>());
 
-  useEffect(() => localStorage.setItem(storeKey, JSON.stringify(data)), [data]);
+  useEffect(() => {
+    dataRef.current = data;
+    localStorage.setItem(storeKey, JSON.stringify(data));
+  }, [data]);
+  useEffect(() => { generatorRef.current = onGeneratePrivateJournal; }, [onGeneratePrivateJournal]);
   useEffect(() => {
     const reload = () => setData(readData());
     window.addEventListener("atherloom:feature-spaces-restored", reload);
@@ -99,10 +114,126 @@ export function FeatureHub(props: FeatureHubProps) {
     return () => window.removeEventListener("keydown", close);
   }, [onClose, open]);
 
+  const generateAiJournal = useCallback(async (targetPersonaKey: string, trigger: JournalTrigger, visibleToUser: boolean, guidance: string) => {
+    if (journalRunningRef.current.has(targetPersonaKey)) throw new Error("这个人格正在写日记，请稍候");
+    journalRunningRef.current.add(targetPersonaKey);
+    const auditId = id("journal-audit");
+    const startedAt = now();
+    const started: JournalAudit = {
+      id: auditId,
+      persona_key: targetPersonaKey,
+      created_at: startedAt,
+      updated_at: startedAt,
+      trigger,
+      status: "started",
+      detail: trigger === "manual" ? "手动写作已开始" : trigger === "catch_up" ? "错过时段，开始补写" : "到达计划时间，开始写作",
+    };
+    setData((current) => ({ ...current, journalAudit: [started, ...current.journalAudit].slice(0, 300) }));
+    try {
+      const earlierPages = dataRef.current.journals
+        .filter((entry) => entry.persona_key === targetPersonaKey && entry.visible_to_ai)
+        .sort((left, right) => right.updated_at.localeCompare(left.updated_at))
+        .slice(0, 6)
+        .map((entry) => `${entry.title}\n${entry.content}`)
+        .join("\n\n")
+        .slice(0, 4000);
+      const writingContext = [
+        guidance.trim() ? `本次线索：${guidance.trim()}` : "",
+        earlierPages ? `你可继续回望的最近日记：\n${earlierPages}` : "",
+      ].filter(Boolean).join("\n\n");
+      const draft = await generatorRef.current(targetPersonaKey, trigger, writingContext);
+      if (!draft.content.trim()) throw new Error("模型没有返回日记正文");
+      const finishedAt = now();
+      const journal: JournalEntry = {
+        id: id("ai-journal"),
+        persona_key: targetPersonaKey,
+        created_at: finishedAt,
+        updated_at: finishedAt,
+        title: draft.title.trim().slice(0, 120) || "一页未题名的日记",
+        content: draft.content.trim().slice(0, 30000),
+        space: "ai",
+        author: "ai",
+        visible_to_user: visibleToUser,
+        visible_to_ai: true,
+      };
+      setData((current) => {
+        const day = localDayKey();
+        return {
+          ...current,
+          journals: [journal, ...current.journals],
+          journalSchedules: current.journalSchedules.map((schedule) => schedule.persona_key === targetPersonaKey && trigger !== "manual" ? {
+            ...schedule,
+            last_run_at: finishedAt,
+            next_run_at: afterHours(schedule.interval_hours),
+            day_key: day,
+            day_count: schedule.day_key === day ? Number(schedule.day_count || 0) + 1 : 1,
+            updated_at: finishedAt,
+          } : schedule),
+          journalAudit: current.journalAudit.map((entry) => entry.id === auditId ? {
+            ...entry,
+            status: "success",
+            detail: visibleToUser ? `写作完成 · ${journal.title} · 对你可见` : "写作完成 · 内容已密封",
+            journal_id: journal.id,
+            updated_at: finishedAt,
+          } : entry),
+        };
+      });
+      return journal;
+    } catch (error) {
+      const failedAt = now();
+      const detail = error instanceof Error ? error.message : "日记生成失败";
+      setData((current) => ({
+        ...current,
+        journalSchedules: current.journalSchedules.map((schedule) => schedule.persona_key === targetPersonaKey && trigger !== "manual" ? {
+          ...schedule,
+          next_run_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+          updated_at: failedAt,
+        } : schedule),
+        journalAudit: current.journalAudit.map((entry) => entry.id === auditId ? { ...entry, status: "failed", detail, updated_at: failedAt } : entry),
+      }));
+      throw error;
+    } finally {
+      journalRunningRef.current.delete(targetPersonaKey);
+    }
+  }, []);
+
+  useEffect(() => {
+    const inspectSchedules = () => {
+      const snapshot = dataRef.current;
+      const currentTime = Date.now();
+      const day = localDayKey();
+      for (const schedule of snapshot.journalSchedules) {
+        if (!schedule.enabled || journalRunningRef.current.has(schedule.persona_key)) continue;
+        const dueAt = new Date(schedule.next_run_at).getTime();
+        if (!Number.isFinite(dueAt) || dueAt > currentTime) continue;
+        const usedToday = schedule.day_key === day ? Number(schedule.day_count || 0) : 0;
+        if (usedToday >= Math.max(1, schedule.daily_limit)) {
+          const skippedAt = now();
+          const skipped: JournalAudit = { id: id("journal-audit"), persona_key: schedule.persona_key, created_at: skippedAt, updated_at: skippedAt, trigger: "scheduled", status: "skipped", detail: `今日已达到 ${schedule.daily_limit} 篇上限` };
+          const tomorrow = new Date();
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          tomorrow.setHours(0, 1, 0, 0);
+          setData((current) => ({
+            ...current,
+            journalSchedules: current.journalSchedules.map((entry) => entry.id === schedule.id ? { ...entry, next_run_at: tomorrow.toISOString(), updated_at: skippedAt } : entry),
+            journalAudit: [skipped, ...current.journalAudit].slice(0, 300),
+          }));
+          continue;
+        }
+        const overdue = currentTime - dueAt;
+        const trigger: JournalTrigger = overdue > Math.max(1, schedule.interval_hours) * 60 * 60 * 1000 ? "catch_up" : "scheduled";
+        void generateAiJournal(schedule.persona_key, trigger, schedule.visible_to_user, schedule.guidance).catch(() => undefined);
+      }
+    };
+    inspectSchedules();
+    const timer = window.setInterval(inspectSchedules, 60_000);
+    return () => window.clearInterval(timer);
+  }, [generateAiJournal]);
+
   if (!open) return null;
 
   const update = <Key extends keyof SpaceData>(key: Key, rows: SpaceData[Key]) => setData((current) => ({ ...current, [key]: rows }));
-  const shared = { data, personaKey, personaName, update, onSendToAssistant };
+  const shared = { data, personaKey, personaName, update, onSendToAssistant, onGenerateJournal: generateAiJournal };
 
   return (
     <div className="feature-hub-layer">
@@ -141,6 +272,7 @@ type SharedProps = {
   personaName: string;
   update: <Key extends keyof SpaceData>(key: Key, rows: SpaceData[Key]) => void;
   onSendToAssistant: (content: string) => Promise<string | undefined>;
+  onGenerateJournal: (personaKey: string, trigger: JournalTrigger, visibleToUser: boolean, guidance: string) => Promise<JournalEntry>;
 };
 
 function LifeSpace({ data, personaKey, update }: SharedProps) {
@@ -168,19 +300,72 @@ function CorrespondenceSpace({ data, personaKey, update }: SharedProps) {
   return <section className="space-section"><div className="space-tabs"><button className={tab === "mail" ? "active" : ""} onClick={() => setTab("mail")}>信箱</button><button className={tab === "contacts" ? "active" : ""} onClick={() => setTab("contacts")}>联系人</button><span>AI 会客厅已按你的要求暂缓</span></div>{tab === "contacts" ? <><form className="space-form" onSubmit={addContact}><label>显示名称<input required value={contactDraft.display_name} onChange={(event) => setContactDraft({ ...contactDraft, display_name: event.target.value })} /></label><label>平台<input required value={contactDraft.platform} onChange={(event) => setContactDraft({ ...contactDraft, platform: event.target.value })} /></label><label>稳定联系人 ID<input required minLength={3} value={contactDraft.stable_id} onChange={(event) => setContactDraft({ ...contactDraft, stable_id: event.target.value })} /></label><button className="primary-button">提交联系人申请</button></form><div className="space-card-list">{contacts.map((contact) => <article key={contact.id}><header><strong>{contact.display_name}</strong><span>{contact.platform}</span></header><p>{contact.stable_id}</p><footer><button type="button" onClick={() => update("contacts", data.contacts.map((item) => item.id === contact.id ? { ...item, user_approved: !item.user_approved, updated_at: now() } : item))}>{contact.user_approved ? "取消批准" : "批准联系人"}</button><button type="button" onClick={() => update("contacts", data.contacts.map((item) => item.id === contact.id ? { ...item, blocked: !item.blocked, updated_at: now() } : item))}>{contact.blocked ? "解除屏蔽" : "屏蔽"}</button></footer></article>)}</div></> : <><form className="space-form" onSubmit={addMail}><label>收发方向<select value={mailDraft.direction} onChange={(event) => setMailDraft({ ...mailDraft, direction: event.target.value as "inbound" | "outbound" })}><option value="outbound">写信</option><option value="inbound">录入来信</option></select></label><label>联系人<select required value={mailDraft.contact_id} onChange={(event) => setMailDraft({ ...mailDraft, contact_id: event.target.value })}><option value="">选择已批准联系人</option>{contacts.filter((item) => item.user_approved && !item.blocked).map((contact) => <option value={contact.id} key={contact.id}>{contact.display_name}</option>)}</select></label><label className="span-all">主题<input required value={mailDraft.subject} onChange={(event) => setMailDraft({ ...mailDraft, subject: event.target.value })} /></label><label className="span-all">正文<textarea required rows={7} value={mailDraft.content} onChange={(event) => setMailDraft({ ...mailDraft, content: event.target.value })} /></label><button className="primary-button">保存并投递</button></form><div className="space-card-list">{mail.map((item) => <article key={item.id}><header><strong>{item.direction === "inbound" ? "收" : "发"} · {item.subject}</strong><time>{timestampLabel(item.created_at)}</time></header><p>{item.content}</p><footer><span>{contacts.find((contact) => contact.id === item.contact_id)?.display_name || "未知联系人"}</span><button type="button" onClick={() => setMailDraft({ contact_id: item.contact_id, direction: "outbound", subject: `回复：${item.subject.replace(/^回复：/, "")}`, content: "" })}>回复</button><button className="danger-action" type="button" onClick={() => update("mail", data.mail.filter((row) => row.id !== item.id))}>删除</button></footer></article>)}</div></>}</section>;
 }
 
-function WritingSpace({ mode, data, personaKey, update }: SharedProps & { mode: "journal" | "board" | "dream" }) {
+function WritingSpace({ mode, data, personaKey, personaName, update, onGenerateJournal }: SharedProps & { mode: "journal" | "board" | "dream" }) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [visibility, setVisibility] = useState("shared");
   const [editing, setEditing] = useState<string | null>(null);
-  const rows = mode === "journal" ? data.journals.filter((item) => item.persona_key === personaKey)
+  const [journalBusy, setJournalBusy] = useState(false);
+  const [journalStatus, setJournalStatus] = useState("");
+  const schedule = data.journalSchedules.find((item) => item.persona_key === personaKey) || null;
+  const [scheduleDraft, setScheduleDraft] = useState({ enabled: false, interval_hours: 24, daily_limit: 1, visible_to_user: false, guidance: "" });
+  const rows = mode === "journal" ? data.journals.filter((item) => item.persona_key === personaKey && (item.author !== "ai" || item.visible_to_user))
     : mode === "board" ? data.board.filter((item) => item.persona_key === personaKey)
       : data.dreams.filter((item) => item.persona_key === personaKey);
+  const sealedCount = mode === "journal" ? data.journals.filter((item) => item.persona_key === personaKey && item.author === "ai" && !item.visible_to_user).length : 0;
+  const audits = data.journalAudit.filter((item) => item.persona_key === personaKey).slice(0, 30);
+
+  useEffect(() => {
+    setScheduleDraft(schedule ? {
+      enabled: schedule.enabled,
+      interval_hours: schedule.interval_hours,
+      daily_limit: schedule.daily_limit,
+      visible_to_user: schedule.visible_to_user,
+      guidance: schedule.guidance || "",
+    } : { enabled: false, interval_hours: 24, daily_limit: 1, visible_to_user: false, guidance: "" });
+    setJournalStatus("");
+  }, [personaKey, schedule?.id, schedule?.updated_at]);
+
+  const saveSchedule = (event: FormEvent) => {
+    event.preventDefault();
+    const stamp = now();
+    const day = localDayKey();
+    const entry: JournalSchedule = {
+      id: schedule?.id || id("journal-schedule"),
+      persona_key: personaKey,
+      created_at: schedule?.created_at || stamp,
+      updated_at: stamp,
+      ...scheduleDraft,
+      interval_hours: Math.max(1, Number(scheduleDraft.interval_hours || 24)),
+      daily_limit: Math.max(1, Number(scheduleDraft.daily_limit || 1)),
+      next_run_at: scheduleDraft.enabled ? afterHours(scheduleDraft.interval_hours) : schedule?.next_run_at || afterHours(scheduleDraft.interval_hours),
+      last_run_at: schedule?.last_run_at,
+      day_key: day,
+      day_count: schedule?.day_key === day ? Number(schedule.day_count || 0) : 0,
+    };
+    update("journalSchedules", [entry, ...data.journalSchedules.filter((item) => item.persona_key !== personaKey)]);
+    setJournalStatus(scheduleDraft.enabled ? `计划已保存，下次预计 ${timestampLabel(entry.next_run_at)}` : "定时写作已关闭");
+  };
+
+  const writeNow = async () => {
+    if (journalBusy) return;
+    setJournalBusy(true);
+    setJournalStatus(`${personaName} 正在自己的安静空间里写…`);
+    try {
+      const entry = await onGenerateJournal(personaKey, "manual", scheduleDraft.visible_to_user, scheduleDraft.guidance);
+      setJournalStatus(entry.visible_to_user ? `已写完《${entry.title}》` : "已写完一篇密封日记；正文不会显示在你的界面里");
+    } catch (error) {
+      setJournalStatus(`写作失败：${error instanceof Error ? error.message : "未知错误"}`);
+    } finally {
+      setJournalBusy(false);
+    }
+  };
+
   const save = (event: FormEvent) => {
     event.preventDefault();
     const stamp = now();
     if (mode === "journal") {
-      const entry: JournalEntry = { id: editing || id("journal"), persona_key: personaKey, created_at: editing ? data.journals.find((item) => item.id === editing)?.created_at || stamp : stamp, updated_at: stamp, title: title || "无题日记", content, space: visibility as JournalEntry["space"], author: "user", visible_to_user: true, visible_to_ai: visibility !== "private" };
+      const entry: JournalEntry = { id: editing || id("journal"), persona_key: personaKey, created_at: editing ? data.journals.find((item) => item.id === editing)?.created_at || stamp : stamp, updated_at: stamp, title: title || "无题日记", content, space: visibility === "private" ? "private" : "shared", author: "user", visible_to_user: true, visible_to_ai: visibility !== "private" };
       update("journals", [entry, ...data.journals.filter((item) => item.id !== editing)]);
     } else if (mode === "board") {
       const entry: BoardEntry = { id: editing || id("board"), persona_key: personaKey, created_at: editing ? data.board.find((item) => item.id === editing)?.created_at || stamp : stamp, updated_at: stamp, content, author: "user", visible_to_user: true, visible_to_ai: visibility !== "private" };
@@ -197,6 +382,7 @@ function WritingSpace({ mode, data, personaKey, update }: SharedProps & { mode: 
     else update("dreams", data.dreams.filter((item) => item.id !== entryId));
   };
   const edit = (entry: JournalEntry | BoardEntry | DreamEntry) => {
+    if (mode === "journal" && (entry as JournalEntry).author === "ai") return;
     setEditing(entry.id);
     setTitle("title" in entry ? entry.title : "");
     setContent(entry.content);
@@ -204,7 +390,27 @@ function WritingSpace({ mode, data, personaKey, update }: SharedProps & { mode: 
     else if (mode === "board") setVisibility((entry as BoardEntry).visible_to_ai ? "shared" : "private");
     else setVisibility((entry as DreamEntry).isolated ? "private" : (entry as DreamEntry).claimed ? "claimed" : "shared");
   };
-  return <section className="space-section"><div className="space-heading"><div><h3>{mode === "journal" ? "私人、共享与 AI 日记" : mode === "board" ? "写给当前人格的便利贴" : "记录、隔离与认领梦境"}</h3><p>可见范围会随每一条内容单独保存。</p></div></div><form className="space-form" onSubmit={save}>{mode !== "board" ? <label className="span-all">标题<input required value={title} onChange={(event) => setTitle(event.target.value)} /></label> : null}<label className="span-all">内容<textarea required rows={7} value={content} onChange={(event) => setContent(event.target.value)} /></label><label>可见范围<select value={visibility} onChange={(event) => setVisibility(event.target.value)}><option value="private">只对自己可见</option><option value="shared">与当前人格共享</option>{mode === "journal" ? <option value="ai">AI 日记区</option> : null}{mode === "dream" ? <option value="claimed">已认领梦境</option> : null}</select></label><div className="form-actions">{editing ? <button type="button" className="secondary-button" onClick={() => { setEditing(null); setTitle(""); setContent(""); }}>取消修改</button> : null}<button className="primary-button">{editing ? "保存修改" : "保存"}</button></div></form><div className="space-card-list">{rows.sort((a, b) => b.updated_at.localeCompare(a.updated_at)).map((entry) => <article key={entry.id}><header><strong>{"title" in entry ? entry.title : entry.author === "ai" ? "AI 留言" : "我的留言"}</strong><time>{timestampLabel(entry.updated_at)}</time></header><p>{entry.content}</p><footer><span>{mode === "dream" ? (entry as DreamEntry).isolated ? "隔离" : (entry as DreamEntry).claimed ? "已认领" : "共享" : "visible_to_ai" in entry && entry.visible_to_ai ? "AI 可见" : "仅自己"}</span><button type="button" onClick={() => edit(entry)}>修改</button><button type="button" className="danger-action" onClick={() => remove(entry.id)}>删除</button></footer></article>)}</div></section>;
+  return <section className="space-section">
+    <div className="space-heading"><div><h3>{mode === "journal" ? "我与 TA 各自的日记" : mode === "board" ? "写给当前人格的便利贴" : "记录、隔离与认领梦境"}</h3><p>{mode === "journal" ? "你的手写日记可选择是否共享；TA 的日记由模型独立写入，不占用也不显示在聊天记录里。" : "可见范围会随每一条内容单独保存。"}</p></div></div>
+    {mode === "journal" ? <>
+      <section className="ai-journal-ledger" aria-labelledby="ai-journal-title">
+        <header><div><span>SEALED LEDGER</span><h4 id="ai-journal-title">{personaName} 的私人写作</h4><p>定时仅在应用打开时到点执行；如果彻底关闭，下一次打开会自动补写并留下审计记录。</p></div><div className="journal-seal" title="密封日记数量"><strong>{sealedCount}</strong><small>篇密封</small></div></header>
+        <form className="journal-engine-form" onSubmit={saveSchedule}>
+          <label className="check-row span-all"><input type="checkbox" checked={scheduleDraft.enabled} onChange={(event) => setScheduleDraft({ ...scheduleDraft, enabled: event.target.checked })} /><span>启用定时写日记</span></label>
+          <label>写作间隔<select value={scheduleDraft.interval_hours} onChange={(event) => setScheduleDraft({ ...scheduleDraft, interval_hours: Number(event.target.value) })}><option value="1">每 1 小时</option><option value="3">每 3 小时</option><option value="6">每 6 小时</option><option value="12">每 12 小时</option><option value="24">每 24 小时</option></select></label>
+          <label>每天最多<select value={scheduleDraft.daily_limit} onChange={(event) => setScheduleDraft({ ...scheduleDraft, daily_limit: Number(event.target.value) })}>{[1, 2, 3, 4, 5, 6].map((value) => <option value={value} key={value}>{value} 篇</option>)}</select></label>
+          <label>你能否阅读<select value={scheduleDraft.visible_to_user ? "visible" : "sealed"} onChange={(event) => setScheduleDraft({ ...scheduleDraft, visible_to_user: event.target.value === "visible" })}><option value="sealed">密封，只显示数量</option><option value="visible">允许我阅读正文</option></select></label>
+          <label className="span-all">可选写作线索<textarea rows={3} value={scheduleDraft.guidance} onChange={(event) => setScheduleDraft({ ...scheduleDraft, guidance: event.target.value })} placeholder="例如：更关注最近共同经历；留空则由 TA 自己决定。" /></label>
+          <div className="journal-engine-actions span-all"><button type="submit" className="secondary-button">保存写作计划</button><button type="button" className="primary-button" disabled={journalBusy} onClick={() => void writeNow()}>{journalBusy ? "正在写…" : "让 TA 现在写一篇"}</button></div>
+          <p className="form-status span-all" aria-live="polite">{journalStatus || (schedule?.enabled ? `下次预计 ${timestampLabel(schedule.next_run_at)}` : "定时写作尚未启用")}</p>
+        </form>
+        <details className="journal-audit"><summary>运行审计 · 最近 {audits.length} 条</summary><div>{audits.map((entry) => <article key={entry.id} data-status={entry.status}><span>{entry.status === "success" ? "完成" : entry.status === "failed" ? "失败" : entry.status === "skipped" ? "跳过" : "进行中"}</span><p>{entry.detail}</p><time>{timestampLabel(entry.updated_at)}</time></article>)}{!audits.length ? <p>还没有写作运行记录。</p> : null}</div></details>
+      </section>
+      <div className="space-subheading"><h4>我的手写日记</h4><p>下面的内容由你创建；“只对自己可见”不会进入当前人格上下文。</p></div>
+    </> : null}
+    <form className="space-form" onSubmit={save}>{mode !== "board" ? <label className="span-all">标题<input required value={title} onChange={(event) => setTitle(event.target.value)} /></label> : null}<label className="span-all">内容<textarea required rows={7} value={content} onChange={(event) => setContent(event.target.value)} /></label><label>可见范围<select value={visibility} onChange={(event) => setVisibility(event.target.value)}><option value="private">只对自己可见</option><option value="shared">与当前人格共享</option>{mode === "dream" ? <option value="claimed">已认领梦境</option> : null}</select></label><div className="form-actions">{editing ? <button type="button" className="secondary-button" onClick={() => { setEditing(null); setTitle(""); setContent(""); }}>取消修改</button> : null}<button className="primary-button">{editing ? "保存修改" : "保存"}</button></div></form>
+    <div className="space-card-list">{[...rows].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).map((entry) => <article className={mode === "journal" && (entry as JournalEntry).author === "ai" ? "ai-authored-entry" : ""} key={entry.id}><header><strong>{"title" in entry ? entry.title : entry.author === "ai" ? "AI 留言" : "我的留言"}</strong><time>{timestampLabel(entry.updated_at)}</time></header><p>{entry.content}</p><footer><span>{mode === "dream" ? (entry as DreamEntry).isolated ? "隔离" : (entry as DreamEntry).claimed ? "已认领" : "共享" : mode === "journal" && (entry as JournalEntry).author === "ai" ? `${personaName} 写作 · 已允许阅读` : "visible_to_ai" in entry && entry.visible_to_ai ? "AI 可见" : "仅自己"}</span>{!(mode === "journal" && (entry as JournalEntry).author === "ai") ? <button type="button" onClick={() => edit(entry)}>修改</button> : null}<button type="button" className="danger-action" onClick={() => remove(entry.id)}>删除</button></footer></article>)}</div>
+  </section>;
 }
 
 async function readBookFile(file: File) {

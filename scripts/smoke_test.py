@@ -27,7 +27,7 @@ imported_worldbook_name = f"导入验证书-{run_id}"
 def mock_chat(route: Route) -> None:
     events = [
         {"reasoning_delta": "先确认界面与流式协议。"},
-        {"delta": "你好，枔枔。这里是 **Atherloom React** 设置迁移版。"},
+        {"delta": "你好，测试用户。这里是 **Atherloom React** 设置迁移版。"},
         {"delta": "\n\n- React + TypeScript\n- 完整设置 CRUD\n- 旧版 Atherloom 视觉"},
         {
             "done": True,

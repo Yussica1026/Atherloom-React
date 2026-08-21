@@ -284,6 +284,7 @@ export interface ChatRequest {
   worldbook_ids?: string[];
   media_context?: string;
   typing_context?: string;
+  thinking_enabled?: boolean;
 }
 
 export interface ChatStreamEvent {

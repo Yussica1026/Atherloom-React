@@ -1,18 +1,55 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getApiBase, setApiBase } from "../adapters/fastapi/client";
+import { saveFile } from "../adapters/native/files";
 import { MenuIcon, SparkIcon } from "../components/Icons";
-import { isThemeName, type ThemeName } from "../domain/types";
+import { isThemeName, type Attachment, type Message, type ThemeName } from "../domain/types";
 import { Composer } from "../features/chat/Composer";
 import { MessageList } from "../features/chat/MessageList";
+import { VoiceCall } from "../features/chat/VoiceCall";
 import { SettingsPanel } from "../features/settings/SettingsPanel";
 import { Sidebar } from "../features/shell/Sidebar";
+import { FeatureHub, type FeatureSpace } from "../features/spaces/FeatureHub";
 import { useWorkspace } from "../features/workspace/useWorkspace";
 import "./styles.css";
 
 const themeKey = "atherloom-react:theme";
 
+function worldbookSelectionKey(conversationId: string | null) {
+  return `atherloom-react:worldbooks:${conversationId || "__new__"}`;
+}
+
+function readFile(file: File, mode: "text" | "data") {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error(`无法读取 ${file.name}`));
+    reader.onload = () => resolve(String(reader.result || ""));
+    if (mode === "text") reader.readAsText(file); else reader.readAsDataURL(file);
+  });
+}
+
 function draftKey(conversationId: string | null, personaId: string | null) {
   return `atherloom-react:draft:${personaId || "__default__"}:${conversationId || "__new__"}`;
+}
+
+function safeFileName(value: string) {
+  return value.replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, " ").trim().slice(0, 70) || "Atherloom-对话";
+}
+
+function redactedTranscript(messages: Message[]) {
+  const handledParents = new Set<string>();
+  const visible = messages.flatMap((message) => {
+    if (message.pending || message.error || message.role === "system") return [];
+    if (message.role !== "assistant" || !message.parent_message_id) return [message];
+    if (handledParents.has(message.parent_message_id)) return [];
+    handledParents.add(message.parent_message_id);
+    const versions = messages.filter((item) => item.role === "assistant" && item.parent_message_id === message.parent_message_id && !item.pending && !item.error);
+    return [versions.find((item) => Boolean(item.selected)) || versions.at(-1) || message];
+  });
+  const redact = (content: string) => content
+    .replace(/\b(sk-[A-Za-z0-9_-]{12,})\b/g, "[已隐藏 API Key]")
+    .replace(/(authorization\s*[:=]\s*(?:bearer\s+)?)[^\s,;]+/gi, "$1[已隐藏]")
+    .replace(/((?:api[_ -]?key|token|secret|密码)\s*[:=：]\s*)[^\s,，;；]+/gi, "$1[已隐藏]");
+  return visible.map((message) => `## ${message.role === "user" ? "我" : "助手"}\n\n${redact(message.content).trim()}`).join("\n\n---\n\n");
 }
 
 export default function App() {
@@ -20,14 +57,26 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [searchResultIds, setSearchResultIds] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachmentStatus, setAttachmentStatus] = useState("");
+  const [selectedWorldbookIds, setSelectedWorldbookIds] = useState<string[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [featureSpace, setFeatureSpace] = useState<FeatureSpace | null>(null);
+  const [callOpen, setCallOpen] = useState(false);
+  const [compressOpen, setCompressOpen] = useState(false);
+  const [compressRounds, setCompressRounds] = useState(1);
+  const [compressProviderId, setCompressProviderId] = useState("");
+  const [compressStatus, setCompressStatus] = useState("");
+  const [compressBusy, setCompressBusy] = useState(false);
   const [theme, setTheme] = useState<ThemeName>(() => {
     const stored = localStorage.getItem(themeKey);
     return isThemeName(stored) ? stored : "system";
   });
   const chatRef = useRef<HTMLElement>(null);
   const nearBottomRef = useRef(true);
+  const typingStartedRef = useRef(0);
+  const typingLastRef = useRef(0);
 
   useEffect(() => {
     localStorage.setItem(themeKey, theme);
@@ -44,6 +93,27 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
+    const rawScale = Number(workspace.settings.font_scale || 100);
+    const scale = Math.max(0.85, Math.min(1.3, rawScale > 5 ? rawScale / 100 : rawScale));
+    document.documentElement.style.setProperty("--font-scale", String(scale));
+    document.documentElement.dataset.codeTheme = String(workspace.settings.code_theme || "auto");
+  }, [workspace.settings.code_theme, workspace.settings.font_scale]);
+
+  useEffect(() => {
+    const handleBack = (event: Event) => {
+      if (callOpen) setCallOpen(false);
+      else if (compressOpen) setCompressOpen(false);
+      else if (featureSpace) setFeatureSpace(null);
+      else if (settingsOpen) setSettingsOpen(false);
+      else if (sidebarOpen) setSidebarOpen(false);
+      else return;
+      event.preventDefault();
+    };
+    window.addEventListener("atherloom:back", handleBack);
+    return () => window.removeEventListener("atherloom:back", handleBack);
+  }, [callOpen, compressOpen, featureSpace, settingsOpen, sidebarOpen]);
+
+  useEffect(() => {
     const container = chatRef.current;
     if (!container || !nearBottomRef.current) return;
     requestAnimationFrame(() => container.scrollTo({ top: container.scrollHeight, behavior: workspace.busy ? "auto" : "smooth" }));
@@ -51,6 +121,13 @@ export default function App() {
 
   useEffect(() => {
     setDraft(localStorage.getItem(draftKey(workspace.currentId, workspace.personaId)) || "");
+    setAttachments([]);
+    try {
+      const stored = JSON.parse(localStorage.getItem(worldbookSelectionKey(workspace.currentId)) || "[]") as unknown;
+      setSelectedWorldbookIds(Array.isArray(stored) ? stored.filter((item): item is string => typeof item === "string") : []);
+    } catch {
+      setSelectedWorldbookIds([]);
+    }
   }, [workspace.currentId, workspace.personaId]);
 
   useEffect(() => {
@@ -96,30 +173,135 @@ export default function App() {
   };
 
   const send = async () => {
-    const content = draft;
-    if (!content.trim()) return;
+    const content = draft.trim() || (attachments.length ? "请查看附件" : "");
+    if (!content) return;
+    const pendingAttachments = attachments;
+    const typingContext = workspace.settings.typing_presence_enabled === false || !typingStartedRef.current ? "" : (() => {
+      const seconds = Math.max(1, Math.round((Date.now() - typingStartedRef.current) / 1000));
+      const pause = Math.max(0, Math.round((Date.now() - typingLastRef.current) / 1000));
+      return `用户本次输入约 ${seconds} 秒，发送前停顿约 ${pause} 秒；未发送任何草稿正文。`;
+    })();
     const storageKey = draftKey(workspace.currentId, workspace.personaId);
     localStorage.removeItem(storageKey);
     setDraft("");
+    setAttachments([]);
+    typingStartedRef.current = 0;
+    typingLastRef.current = 0;
     try {
-      await workspace.send(content);
+      await workspace.send(content, pendingAttachments, selectedWorldbookIds, typingContext);
     } catch {
       setDraft(content);
+      setAttachments(pendingAttachments);
       localStorage.setItem(storageKey, content);
       setSettingsOpen(true);
     }
   };
 
+  const addFiles = async (files: File[]) => {
+    setAttachmentStatus("");
+    const available = Math.max(0, 8 - attachments.length);
+    const accepted = files.slice(0, available);
+    const rejected: string[] = [];
+    const prepared: Attachment[] = [];
+    for (const file of accepted) {
+      if (file.size > 12 * 1024 * 1024) {
+        rejected.push(`${file.name} 超过 12 MB`);
+        continue;
+      }
+      try {
+        const image = file.type.startsWith("image/");
+        const text = file.type.startsWith("text/") || /\.(md|txt|json|csv|js|ts|tsx|py|html|css)$/i.test(file.name);
+        const pdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+        prepared.push({
+          id: crypto.randomUUID?.() || `attachment-${Date.now()}-${Math.random()}`,
+          name: file.name,
+          mime: file.type || "application/octet-stream",
+          kind: image ? "image" : text ? "text" : pdf ? "pdf" : "file",
+          data: image || pdf ? await readFile(file, "data") : undefined,
+          text: text ? (await readFile(file, "text")).slice(0, 120_000) : undefined,
+          size: file.size,
+        });
+      } catch (error) {
+        rejected.push(`${file.name}：${error instanceof Error ? error.message : "读取失败"}`);
+      }
+    }
+    setAttachments((current) => [...current, ...prepared].slice(0, 8));
+    if (files.length > available) rejected.push(`一次最多保留 8 个附件`);
+    if (rejected.length) setAttachmentStatus(rejected.join("；"));
+  };
+
+  const updateWorldbookSelection = (ids: string[]) => {
+    const valid = [...new Set(ids)].filter((id) => workspace.worldbooks.some((book) => book.id === id && book.enabled !== false));
+    setSelectedWorldbookIds(valid);
+    localStorage.setItem(worldbookSelectionKey(workspace.currentId), JSON.stringify(valid));
+  };
+
+  const openCompress = () => {
+    const available = Math.max(0, workspace.messages.filter((item) => item.role === "user").length - 1);
+    setCompressRounds(Math.max(1, Math.min(10, available)));
+    setCompressProviderId(workspace.providerId || workspace.providers[0]?.id || "");
+    setCompressStatus(available ? `当前最多可压缩约 ${available} 轮，始终保留最近一轮原文。` : "当前没有可压缩的旧轮次。");
+    setCompressOpen(true);
+  };
+
+  const compressConversation = async () => {
+    setCompressBusy(true);
+    setCompressStatus("正在整理较早对话，原文暂不改动…");
+    try {
+      const result = await workspace.compressConversation(compressRounds, compressProviderId);
+      setCompressStatus(`已压缩 ${result.rounds} 轮（${result.messages} 条消息），还可继续压缩约 ${result.available_rounds} 轮。`);
+    } catch (error) {
+      setCompressStatus(`压缩失败：${error instanceof Error ? error.message : "未知错误"}。原文未改动。`);
+    } finally {
+      setCompressBusy(false);
+    }
+  };
+
   const changeDraft = (value: string) => {
+    if (value && !typingStartedRef.current) typingStartedRef.current = Date.now();
+    if (value) typingLastRef.current = Date.now();
+    else {
+      typingStartedRef.current = 0;
+      typingLastRef.current = 0;
+    }
     setDraft(value);
     const storageKey = draftKey(workspace.currentId, workspace.personaId);
     if (value) localStorage.setItem(storageKey, value); else localStorage.removeItem(storageKey);
   };
 
   const hasConversationContent = Boolean(workspace.messages.length);
+  const favoriteMessageIds = useMemo(
+    () => new Set(workspace.favorites.filter((item) => (item.owners || []).includes("user")).map((item) => item.source_message_id)),
+    [workspace.favorites],
+  );
+
+  const chooseQuestionOption = (question: string, option: string) => {
+    const prefix = `关于「${question}」，我的选择是：`;
+    const line = `${prefix}${option}`;
+    const lines = draft.trim() ? draft.trim().split("\n") : [];
+    const existing = lines.findIndex((item) => item.startsWith(prefix));
+    if (existing >= 0) lines[existing] = line; else lines.push(line);
+    changeDraft(lines.join("\n"));
+  };
+
+  const exportConversationMarkdown = async () => {
+    const title = workspace.currentConversation?.title || "Atherloom-对话";
+    const transcript = redactedTranscript(workspace.messages);
+    if (!transcript) {
+      setAttachmentStatus("当前没有可导出的消息。");
+      return;
+    }
+    try {
+      const markdown = `# ${title}\n\n> 由 Atherloom 导出；系统提示、思考过程、附件原始数据和密钥已排除。\n\n${transcript}\n`;
+      const result = await saveFile(`${safeFileName(title)}.md`, new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
+      setAttachmentStatus(result);
+    } catch (error) {
+      setAttachmentStatus(`导出失败：${error instanceof Error ? error.message : "未知错误"}`);
+    }
+  };
 
   return (
-    <div className={`app-shell${sidebarOpen ? " sidebar-open" : ""}`}>
+    <div className={`app-shell density-${workspace.settings.message_density || "comfortable"}${sidebarOpen ? " sidebar-open" : ""}`}>
       <Sidebar
         conversations={conversations}
         personas={workspace.personas}
@@ -137,7 +319,12 @@ export default function App() {
         onRenameConversation={workspace.renameConversation}
         onUpdateConversationState={workspace.updateConversationState}
         onDeleteConversation={workspace.deleteConversation}
+        onClearPersonaConversations={workspace.clearPersonaConversations}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSpace={(space) => {
+          setFeatureSpace(space);
+          setSidebarOpen(false);
+        }}
         onClose={() => setSidebarOpen(false)}
       />
       <button className="mobile-sidebar-backdrop" aria-label="关闭侧栏" onClick={() => setSidebarOpen(false)} />
@@ -145,7 +332,8 @@ export default function App() {
       <main className="main">
         <header className="topbar">
           <button className="mobile-menu" type="button" aria-label="打开菜单" onClick={() => setSidebarOpen(true)}><MenuIcon /></button>
-          <div className="conversation-title">{workspace.currentConversation?.title || "新对话"}</div>
+          <div className="conversation-title"><strong>{workspace.currentConversation?.title || "新对话"}</strong><small>{workspace.busy ? "正在生成" : "就绪"} · {workspace.personas.find((item) => item.id === workspace.personaId)?.name || "默认人格"} · {workspace.providers.find((item) => item.id === workspace.providerId)?.model || "未选模型"}</small></div>
+          <div className="topbar-actions"><button className="topbar-action" type="button" title="导出脱敏 Markdown" aria-label="导出脱敏 Markdown" onClick={() => void exportConversationMarkdown()}>↓</button><button className="topbar-action" type="button" title="主动压缩对话" aria-label="主动压缩对话" onClick={openCompress}>⇲</button><button className="topbar-action" type="button" title="语音通话" aria-label="语音通话" onClick={() => setCallOpen(true)}>♩</button></div>
         </header>
 
         <section
@@ -175,29 +363,64 @@ export default function App() {
             </div>
           ) : null}
           {workspace.error && hasConversationContent ? <div className="inline-error">{workspace.error}</div> : null}
-          <MessageList messages={workspace.messages} />
+          <MessageList
+            messages={workspace.messages}
+            favoriteMessageIds={favoriteMessageIds}
+            busy={workspace.busy}
+            onFavorite={workspace.toggleFavorite}
+            onEdit={workspace.editMessage}
+            onRegenerate={workspace.regenerateMessage}
+            onSelectVersion={workspace.selectMessageVersion}
+            onBranch={workspace.branchFromMessage}
+            onDeleteVersion={workspace.deleteMessageVersion}
+            onDeleteAllVersions={workspace.deleteAllMessageVersions}
+            onQuestionOption={chooseQuestionOption}
+          />
         </section>
 
+        {workspace.settings.typing_presence_enabled !== false && draft.trim() ? <div className="typing-presence">正在向 {workspace.personas.find((item) => item.id === workspace.personaId)?.name || "当前人格"} 共享输入状态（不会发送未完成正文）</div> : null}
         <Composer
           value={draft}
           busy={workspace.busy}
+          attachments={attachments}
           providers={workspace.providers}
           personas={workspace.personas}
+          worldbooks={workspace.worldbooks}
+          selectedWorldbookIds={selectedWorldbookIds}
+          quickPhrases={workspace.personas.find((item) => item.id === workspace.personaId)?.config?.quick_phrases || []}
           providerId={workspace.providerId}
           personaId={workspace.personaId}
           onChange={changeDraft}
-          onProviderChange={(id) => id ? workspace.setProviderId(id) : setSettingsOpen(true)}
+          onProviderChange={(value) => value ? void workspace.selectProviderModel(value) : setSettingsOpen(true)}
           onPersonaChange={(id) => void workspace.setPersonaId(id)}
+          onAddFiles={addFiles}
+          onRemoveAttachment={(id) => setAttachments((current) => current.filter((item) => item.id !== id))}
+          onWorldbookSelectionChange={updateWorldbookSelection}
           onSend={() => void send()}
           onStop={workspace.stop}
         />
+        {attachmentStatus ? <div className="composer-status" role="alert">{attachmentStatus}</div> : null}
       </main>
+
+      {compressOpen ? (
+        <div className="dialog-layer compact-dialog-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setCompressOpen(false)}>
+          <section className="compact-dialog" role="dialog" aria-modal="true" aria-labelledby="compress-title">
+            <header><div><span>CONTEXT</span><h2 id="compress-title">主动压缩对话</h2></div><button type="button" aria-label="关闭" onClick={() => setCompressOpen(false)}>×</button></header>
+            <label>压缩线路<select value={compressProviderId} onChange={(event) => setCompressProviderId(event.target.value)}>{workspace.providers.filter((item) => item.enabled !== false).map((provider) => <option value={provider.id} key={provider.id}>{provider.name} · {provider.model}</option>)}</select></label>
+            <label>压缩较早轮数<input type="number" min="1" max={Math.max(1, workspace.messages.filter((item) => item.role === "user").length - 1)} value={compressRounds} onChange={(event) => setCompressRounds(Math.max(1, Number(event.target.value) || 1))} /></label>
+            <p className="form-status" aria-live="polite">{compressStatus}</p>
+            <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setCompressOpen(false)}>关闭</button><button type="button" className="primary-button" disabled={compressBusy || !compressProviderId || workspace.messages.filter((item) => item.role === "user").length < 2} onClick={() => void compressConversation()}>{compressBusy ? "正在压缩…" : "开始压缩"}</button></div>
+          </section>
+        </div>
+      ) : null}
 
       <SettingsPanel
         open={settingsOpen}
         providers={workspace.providers}
         personas={workspace.personas}
         worldbooks={workspace.worldbooks}
+        mcpServers={workspace.mcpServers}
+        personaId={workspace.personaId}
         settings={workspace.settings}
         theme={theme}
         apiBase={getApiBase()}
@@ -221,6 +444,40 @@ export default function App() {
         onDeleteWorldbook={workspace.deleteWorldbook}
         onExportBackup={workspace.exportBackup}
         onRestoreBackup={workspace.restoreBackup}
+        onCreateMcpServer={workspace.createMcpServer}
+        onUpdateMcpServer={workspace.updateMcpServer}
+        onDeleteMcpServer={workspace.deleteMcpServer}
+        onTestMcpServer={workspace.testMcpServer}
+        onRefreshMcpServer={workspace.refreshMcpServer}
+      />
+      <FeatureHub
+        open={featureSpace}
+        personaId={workspace.personaId}
+        personas={workspace.personas}
+        worldbooks={workspace.worldbooks}
+        favorites={workspace.favorites}
+        onClose={() => setFeatureSpace(null)}
+        onChangeSpace={setFeatureSpace}
+        onOpenFavorite={async (conversationId) => {
+          await workspace.openConversation(conversationId);
+          setFeatureSpace(null);
+        }}
+        onUnfavorite={workspace.toggleFavorite}
+        onSendToAssistant={async (content) => {
+          try {
+            return await workspace.send(content, [], selectedWorldbookIds);
+          } catch {
+            setSettingsOpen(true);
+            return "";
+          }
+        }}
+      />
+      <VoiceCall
+        open={callOpen}
+        personaName={workspace.personas.find((item) => item.id === workspace.personaId)?.name || "当前人格"}
+        assistantText={[...workspace.messages].reverse().find((item) => item.role === "assistant" && !item.pending)?.content || ""}
+        onClose={() => setCallOpen(false)}
+        onTranscript={async (content) => { await workspace.send(content, [], selectedWorldbookIds); }}
       />
     </div>
   );

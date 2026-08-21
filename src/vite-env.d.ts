@@ -6,6 +6,7 @@ interface AtherloomNativeBridge {
   apiRequest(method: string, path: string, body: string): string;
   apiRequestAsync?(method: string, path: string, body: string, callbackId: string): void;
   getClipboard?(): string;
+  setClipboard?(value: string): string;
   saveProvider?(raw: string): string;
   listProviders?(): string;
   deleteProvider?(id: string): string;

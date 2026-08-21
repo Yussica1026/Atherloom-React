@@ -2,9 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fastApi, streamChat } from "../../adapters/fastapi/client";
 import type {
   AppSettings,
+  Attachment,
   BackupBundle,
   BackupPart,
   Conversation,
+  Favorite,
+  McpServer,
+  McpServerDraft,
   Message,
   Persona,
   PersonaDraft,
@@ -47,12 +51,37 @@ function localTimeContext() {
   return `${now.toLocaleDateString("zh-CN")} ${now.toLocaleTimeString("zh-CN", { hour12: false })}`;
 }
 
+function providerDraft(provider: Provider, model = provider.model): ProviderDraft {
+  return {
+    name: provider.name,
+    protocol: provider.protocol,
+    base_url: provider.base_url,
+    api_key: "",
+    model,
+    models: [...new Set([model, ...(provider.models || [])])],
+    enabled: provider.enabled !== false,
+    custom_headers: provider.custom_headers || "{}",
+    prompt_cache: provider.prompt_cache !== false,
+    thinking_enabled: provider.thinking_enabled !== false,
+    stream_enabled: provider.stream_enabled !== false,
+    temperature: provider.temperature ?? 0.7,
+    top_p: provider.top_p ?? 1,
+    max_tokens: provider.max_tokens ?? 4096,
+    vision_mode: provider.vision_mode || "auto",
+    cache_mode: provider.cache_mode || "auto",
+    prompt_cache_key: provider.prompt_cache_key || "",
+    source_provider_id: provider.id,
+  };
+}
+
 export function useWorkspace() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [worldbooks, setWorldbooks] = useState<Worldbook[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [settings, setSettings] = useState<AppSettings>({});
+  const [favorites, setFavorites] = useState<Favorite[]>([]);
+  const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [providerId, setProviderIdState] = useState<string | null>(null);
   const [personaId, setPersonaIdState] = useState<string | null>(null);
   const [currentId, setCurrentId] = useState<string | null>(null);
@@ -62,6 +91,8 @@ export function useWorkspace() {
   const [error, setError] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const settingsRef = useRef<AppSettings>({});
+  const settingsSaveRef = useRef<Promise<unknown>>(Promise.resolve());
+  const settingsRevisionRef = useRef(0);
   const hydratePromiseRef = useRef<Promise<void> | null>(null);
   const personaRequestRef = useRef(0);
 
@@ -71,7 +102,10 @@ export function useWorkspace() {
       setLoading(true);
       setError("");
       try {
-        const payload = await fastApi.bootstrap();
+        const [payload, nextFavorites] = await Promise.all([
+          fastApi.bootstrap(),
+          fastApi.listFavorites().catch(() => [] as Favorite[]),
+        ]);
         const nextProviders = payload.providers || [];
         const nextPersonas = payload.personas || [];
         const nextConversations = payload.conversations || [];
@@ -80,6 +114,8 @@ export function useWorkspace() {
         setWorldbooks(payload.worldbooks || []);
         setConversations(nextConversations);
         setSettings(payload.settings || {});
+        setFavorites(nextFavorites);
+        setMcpServers(payload.mcp_servers || []);
         settingsRef.current = payload.settings || {};
 
         const storedProvider = localStorage.getItem(providerKey);
@@ -144,17 +180,20 @@ export function useWorkspace() {
 
   const openConversation = useCallback(async (id: string) => {
     if (busy) return;
+    const requestId = ++personaRequestRef.current;
     setError("");
     try {
       const conversation = conversations.find((item) => item.id === id);
       if (!conversation) throw new Error("找不到这条对话");
       if ((conversation.persona_id || null) !== personaId) throw new Error("这条对话属于其他人格，已阻止串线");
       const nextMessages = await fastApi.conversationMessages(id);
+      if (requestId !== personaRequestRef.current) return;
       setCurrentId(id);
       setMessages(nextMessages);
       rememberConversation(id, personaId);
       if (conversation?.provider_id) setProviderId(conversation.provider_id);
     } catch (caught) {
+      if (requestId !== personaRequestRef.current) return;
       setError(caught instanceof Error ? caught.message : "读取对话失败");
     }
   }, [busy, conversations, personaId, setProviderId]);
@@ -206,6 +245,7 @@ export function useWorkspace() {
       rememberConversation(resume.id, id);
       if (resume.provider_id) setProviderId(resume.provider_id);
     } catch (caught) {
+      if (requestId !== personaRequestRef.current) return;
       rememberConversation(null, id);
       setError(caught instanceof Error ? caught.message : "切换人格失败");
     }
@@ -253,6 +293,40 @@ export function useWorkspace() {
       setError(caught instanceof Error ? caught.message : "对话已删除，但下一条对话读取失败");
     }
   }, [busy, conversations, currentId, messages, personaId, setProviderId]);
+
+  const clearPersonaConversations = useCallback(async () => {
+    if (busy) throw new Error("请先停止当前生成，再清空对话");
+    const scoped = conversations.filter((item) => (item.persona_id || null) === personaId);
+    if (!scoped.length) return;
+    const ids = new Set(scoped.map((item) => item.id));
+    const previousConversations = conversations;
+    const previousCurrentId = currentId;
+    const previousMessages = messages;
+    setConversations((current) => current.filter((item) => !ids.has(item.id)));
+    setCurrentId(null);
+    setMessages([]);
+    rememberConversation(null, personaId);
+    const failures: string[] = [];
+    for (const id of ids) {
+      try {
+        await fastApi.deleteConversation(id);
+      } catch (error) {
+        failures.push(`${id}：${error instanceof Error ? error.message : "删除失败"}`);
+      }
+    }
+    if (!failures.length) return;
+    try {
+      const payload = await fastApi.bootstrap();
+      setConversations(payload.conversations || []);
+      setFavorites(await fastApi.listFavorites(personaId || "__default__"));
+    } catch {
+      setConversations(previousConversations);
+      setCurrentId(previousCurrentId);
+      setMessages(previousMessages);
+      rememberConversation(previousCurrentId, personaId);
+    }
+    throw new Error(`没有全部删完：${failures[0]}`);
+  }, [busy, conversations, currentId, messages, personaId]);
 
   const renameConversation = useCallback(async (id: string, title: string) => {
     const normalized = title.trim();
@@ -315,7 +389,13 @@ export function useWorkspace() {
     return matches.filter((item) => (item.persona_id || null) === personaId);
   }, [personaId]);
 
-  const send = useCallback(async (content: string) => {
+  const runGeneration = useCallback(async (
+    content: string,
+    reuseUserMessageId: string | null = null,
+    attachments: Attachment[] = [],
+    worldbookIds: string[] = [],
+    typingContext = "",
+  ) => {
     const trimmed = content.trim();
     if (!trimmed || busy) return;
     if (!providerId) throw new Error("请先添加并选择 API 线路");
@@ -323,39 +403,80 @@ export function useWorkspace() {
     const conversation = currentId ? conversations.find((item) => item.id === currentId) : await createConversation();
     if (!conversation) throw new Error("无法创建对话");
 
-    const userClientId = clientId("user");
+    const userClientId = reuseUserMessageId ? "" : clientId("user");
     const assistantClientId = clientId("assistant");
     const provider = providers.find((item) => item.id === providerId);
     setMessages((current) => [
-      ...current,
-      { client_id: userClientId, role: "user", content: trimmed },
-      { client_id: assistantClientId, role: "assistant", content: "", reasoning: "", model: provider?.model, pending: true },
+      ...current.filter((message) => !(reuseUserMessageId && message.role === "assistant" && message.parent_message_id === reuseUserMessageId && message.error)),
+      ...(reuseUserMessageId ? [] : [{ client_id: userClientId, role: "user" as const, content: trimmed, attachments }]),
+      {
+        client_id: assistantClientId,
+        role: "assistant" as const,
+        content: "",
+        reasoning: "",
+        model: provider?.model,
+        parent_message_id: reuseUserMessageId,
+        pending: true,
+        selected: true,
+      },
     ]);
     setBusy(true);
     setError("");
     const controller = new AbortController();
+    let assistantText = "";
     abortRef.current = controller;
 
     try {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      if (!reuseUserMessageId && currentId) {
+        const userRounds = messages.filter((item) => item.role === "user").length;
+        const estimatedTokens = Math.ceil(messages.reduce((sum, item) => sum + item.content.length, 0) * 0.9);
+        const roundTrigger = settingsRef.current.summary_enabled !== false
+          && userRounds >= Math.max(4, Number(settingsRef.current.summary_trigger_rounds || 24));
+        const tokenTrigger = Boolean(settingsRef.current.summary_token_enabled)
+          && estimatedTokens >= Math.max(1000, Number(settingsRef.current.summary_token_threshold || 32000));
+        const summaryProviderId = String(settingsRef.current.summary_provider_id || providerId);
+        if ((roundTrigger || tokenTrigger) && summaryProviderId && userRounds > 1) {
+          try {
+            const compressed = await fastApi.compressConversation(currentId, Math.max(1, userRounds - 1), summaryProviderId);
+            setConversations((current) => current.map((item) => item.id === currentId ? { ...item, summary: compressed.summary } : item));
+          } catch {
+            // Automatic compression is best effort; a failed summary must never consume or block the user's message.
+          }
+        }
+      }
       await streamChat({
         conversation_id: conversation.id,
         content: trimmed,
         provider_id: providerId,
         persona_id: personaId,
+        reuse_user_message_id: reuseUserMessageId,
         local_time: localTimeContext(),
+        vision_provider_id: String(settingsRef.current.vision_provider_id || ""),
+        attachments,
+        worldbook_ids: worldbookIds,
+        typing_context: reuseUserMessageId ? "" : typingContext,
       }, controller.signal, (event) => {
         if (event.error) throw new Error(event.error);
+        assistantText += event.delta || "";
         setMessages((current) => current.map((message) => {
           if (message.client_id === userClientId && event.user_id) return { ...message, id: event.user_id };
+          const parentId = reuseUserMessageId || event.user_id || null;
+          if (event.done && parentId && message.role === "assistant" && message.client_id !== assistantClientId && message.parent_message_id === parentId) {
+            return { ...message, selected: false };
+          }
           if (message.client_id !== assistantClientId) return message;
           return {
             ...message,
             id: event.assistant_id || message.id,
+            parent_message_id: parentId || message.parent_message_id,
             content: message.content + (event.delta || ""),
             reasoning: (message.reasoning || "") + (event.reasoning_delta || ""),
             memory_sources: event.memory_sources || message.memory_sources,
             usage: event.usage || message.usage,
+            tool_events: event.tool_event ? [...(message.tool_events || []), event.tool_event] : message.tool_events,
             pending: !event.done,
+            selected: event.done ? true : message.selected,
           };
         }));
         if (event.title) {
@@ -373,7 +494,107 @@ export function useWorkspace() {
       abortRef.current = null;
       setBusy(false);
     }
-  }, [busy, conversations, createConversation, currentId, personaId, providerId, providers]);
+    return assistantText.trim();
+  }, [busy, conversations, createConversation, currentId, messages, personaId, providerId, providers]);
+
+  const send = useCallback((content: string, attachments: Attachment[] = [], worldbookIds: string[] = [], typingContext = "") => (
+    runGeneration(content, null, attachments, worldbookIds, typingContext)
+  ), [runGeneration]);
+
+  const regenerateMessage = useCallback(async (message: Message) => {
+    const userId = message.role === "user" ? message.id : message.parent_message_id;
+    if (!userId) throw new Error("这条消息还没有保存，暂时不能重新 Roll");
+    const userMessage = messages.find((item) => item.id === userId && item.role === "user");
+    if (!userMessage) throw new Error("找不到这条回答对应的用户消息");
+    await runGeneration(userMessage.content, userId);
+  }, [messages, runGeneration]);
+
+  const editMessage = useCallback(async (messageId: string, content: string) => {
+    const normalized = content.trim();
+    if (!normalized) throw new Error("消息内容不能为空");
+    const saved = await fastApi.editMessage(messageId, normalized);
+    setMessages((current) => current.map((item) => item.id === messageId ? { ...item, content: saved.content } : item));
+    setConversations((current) => current.map((item) => item.id === currentId ? { ...item, summary: "" } : item));
+    return saved;
+  }, [currentId]);
+
+  const selectProviderModel = useCallback(async (value: string) => {
+    const separator = value.indexOf("::");
+    const nextProviderId = separator >= 0 ? value.slice(0, separator) : value;
+    const model = separator >= 0 ? decodeURIComponent(value.slice(separator + 2)) : "";
+    const provider = providers.find((item) => item.id === nextProviderId);
+    if (!provider) throw new Error("模型线路不存在");
+    let savedProvider = provider;
+    if (model && model !== provider.model) {
+      savedProvider = await fastApi.updateProvider(provider.id, providerDraft(provider, model));
+      setProviders((current) => current.map((item) => item.id === provider.id ? savedProvider : item));
+    }
+    setProviderId(nextProviderId);
+    if (currentId) {
+      const savedConversation = await fastApi.updateConversation(currentId, { provider_id: nextProviderId });
+      setConversations((current) => current.map((item) => item.id === currentId ? savedConversation : item));
+    }
+    return savedProvider;
+  }, [currentId, providers, setProviderId]);
+
+  const selectMessageVersion = useCallback(async (parentMessageId: string, assistantMessageId: string) => {
+    if (!currentId) throw new Error("当前没有打开的对话");
+    const previous = messages;
+    setMessages((current) => current.map((item) => item.role === "assistant" && item.parent_message_id === parentMessageId
+      ? { ...item, selected: item.id === assistantMessageId }
+      : item));
+    try {
+      await fastApi.selectMessageVersion(currentId, parentMessageId, assistantMessageId);
+      setConversations((current) => current.map((item) => item.id === currentId ? { ...item, summary: "" } : item));
+    } catch (caught) {
+      setMessages(previous);
+      throw caught;
+    }
+  }, [currentId, messages]);
+
+  const deleteMessageVersion = useCallback(async (messageId: string) => {
+    const result = await fastApi.deleteMessageVersion(messageId);
+    const removed = new Set(result.deleted || [messageId]);
+    setMessages((current) => current.filter((item) => !item.id || !removed.has(item.id)));
+    setFavorites((current) => current.filter((item) => !removed.has(item.source_message_id)));
+    setConversations((current) => current.map((item) => item.id === currentId ? { ...item, summary: "" } : item));
+  }, [currentId]);
+
+  const deleteAllMessageVersions = useCallback(async (messageId: string) => {
+    const result = await fastApi.deleteAllMessageVersions(messageId);
+    const removed = new Set(result.deleted || []);
+    setMessages((current) => current.filter((item) => !item.id || !removed.has(item.id)));
+    setFavorites((current) => current.filter((item) => !removed.has(item.source_message_id)));
+    setConversations((current) => current.map((item) => item.id === currentId ? { ...item, summary: "" } : item));
+  }, [currentId]);
+
+  const branchFromMessage = useCallback(async (messageId: string) => {
+    if (!currentId) throw new Error("当前没有打开的对话");
+    const requestId = ++personaRequestRef.current;
+    const conversation = await fastApi.branchConversation(currentId, messageId);
+    const nextMessages = await fastApi.conversationMessages(conversation.id);
+    if (requestId !== personaRequestRef.current) return conversation;
+    setConversations((current) => [conversation, ...current]);
+    setCurrentId(conversation.id);
+    setMessages(nextMessages);
+    rememberConversation(conversation.id, personaId);
+    return conversation;
+  }, [currentId, personaId]);
+
+  const compressConversation = useCallback(async (rounds: number, compressionProviderId: string) => {
+    if (busy) throw new Error("请先等待当前回复完成或停止生成");
+    if (!currentId) throw new Error("当前还没有可压缩的对话");
+    const result = await fastApi.compressConversation(currentId, rounds, compressionProviderId);
+    setConversations((current) => current.map((item) => item.id === currentId ? { ...item, summary: result.summary } : item));
+    return result;
+  }, [busy, currentId]);
+
+  const toggleFavorite = useCallback(async (messageId: string) => {
+    const existing = favorites.some((item) => item.source_message_id === messageId && (item.owners || []).includes("user"));
+    if (existing) await fastApi.unfavoriteMessage(messageId);
+    else await fastApi.favoriteMessage(messageId);
+    setFavorites(await fastApi.listFavorites());
+  }, [favorites]);
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
 
@@ -470,16 +691,23 @@ export function useWorkspace() {
   const updateSettings = useCallback(async (patch: Partial<AppSettings>) => {
     const previous = settingsRef.current;
     const optimistic = { ...previous, ...patch };
+    const revision = ++settingsRevisionRef.current;
     settingsRef.current = optimistic;
     setSettings(optimistic);
+    const task = settingsSaveRef.current.catch(() => undefined).then(() => fastApi.updateSettings(optimistic));
+    settingsSaveRef.current = task;
     try {
-      const saved = await fastApi.updateSettings(optimistic);
-      settingsRef.current = saved;
-      setSettings(saved);
+      const saved = await task;
+      if (settingsRevisionRef.current === revision) {
+        settingsRef.current = saved;
+        setSettings(saved);
+      }
       return saved;
     } catch (error) {
-      settingsRef.current = previous;
-      setSettings(previous);
+      if (settingsRevisionRef.current === revision) {
+        settingsRef.current = previous;
+        setSettings(previous);
+      }
       throw error;
     }
   }, []);
@@ -501,13 +729,58 @@ export function useWorkspace() {
     setWorldbooks((current) => current.filter((item) => item.id !== id));
   }, []);
 
-  const exportBackup = useCallback((parts: BackupPart[]) => fastApi.exportBackup(parts), []);
-  const restoreBackup = useCallback((bundle: BackupBundle, parts: BackupPart[]) => fastApi.restoreBackup(bundle, parts), []);
+  const createMcpServer = useCallback(async (draft: McpServerDraft) => {
+    const server = await fastApi.createMcpServer(draft);
+    setMcpServers((current) => [server, ...current]);
+    return server;
+  }, []);
+
+  const updateMcpServer = useCallback(async (id: string, draft: McpServerDraft) => {
+    const server = await fastApi.updateMcpServer(id, draft);
+    setMcpServers((current) => current.map((item) => item.id === id ? server : item));
+    return server;
+  }, []);
+
+  const deleteMcpServer = useCallback(async (id: string) => {
+    await fastApi.deleteMcpServer(id);
+    setMcpServers((current) => current.filter((item) => item.id !== id));
+  }, []);
+
+  const refreshMcpServer = useCallback(async (id: string) => {
+    const server = await fastApi.refreshMcpServer(id);
+    setMcpServers((current) => current.map((item) => item.id === id ? server : item));
+    return server;
+  }, []);
+
+  const exportBackup = useCallback(async (parts: BackupPart[]) => {
+    const bundle = await fastApi.exportBackup(parts);
+    const clientData: Record<string, string> = { ...(bundle.client_data || {}) };
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (!key || !(key === "atherloom-react:feature-spaces:v1" || key === "atherloom-react:theme"
+        || key.startsWith("atherloom-react:draft:") || key.startsWith("atherloom-react:worldbooks:"))) continue;
+      clientData[key] = localStorage.getItem(key) || "";
+    }
+    return { ...bundle, client_data: clientData };
+  }, []);
+  const restoreBackup = useCallback(async (bundle: BackupBundle, parts: BackupPart[]) => {
+    const result = await fastApi.restoreBackup(bundle, parts);
+    for (const [key, value] of Object.entries(bundle.client_data || {})) {
+      if (!(key === "atherloom-react:feature-spaces:v1" || key === "atherloom-react:theme"
+        || key.startsWith("atherloom-react:draft:") || key.startsWith("atherloom-react:worldbooks:"))) continue;
+      localStorage.setItem(key, value);
+    }
+    window.dispatchEvent(new CustomEvent("atherloom:feature-spaces-restored"));
+    await hydrate();
+    return result;
+  }, [hydrate]);
 
   return {
     providers,
     personas,
     worldbooks,
+    mcpServers,
+    favorites,
     conversations: visibleConversations,
     settings,
     providerId,
@@ -519,10 +792,12 @@ export function useWorkspace() {
     busy,
     error,
     setProviderId,
+    selectProviderModel,
     setPersonaId: selectPersona,
     openConversation,
     createConversation,
     deleteConversation,
+    clearPersonaConversations,
     renameConversation,
     updateConversationState,
     searchConversations,
@@ -538,9 +813,22 @@ export function useWorkspace() {
     createWorldbook,
     updateWorldbook,
     deleteWorldbook,
+    createMcpServer,
+    updateMcpServer,
+    deleteMcpServer,
+    refreshMcpServer,
+    testMcpServer: fastApi.testMcpServer,
     exportBackup,
     restoreBackup,
     send,
+    regenerateMessage,
+    editMessage,
+    selectMessageVersion,
+    deleteMessageVersion,
+    deleteAllMessageVersions,
+    branchFromMessage,
+    compressConversation,
+    toggleFavorite,
     stop,
     retry: hydrate,
   };

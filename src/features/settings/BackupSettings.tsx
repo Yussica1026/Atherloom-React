@@ -18,12 +18,13 @@ const choices: Array<{ value: BackupPart; label: string; detail: string }> = [
 const clientPrefix = "atherloom-react:";
 const apiBaseKey = `${clientPrefix}api-base`;
 const snapshotKey = `${clientPrefix}pre-restore`;
+const standaloneStateKey = `${clientPrefix}standalone-state:v1`;
 
 function collectClientData() {
   const result: Record<string, string> = {};
   for (let index = 0; index < localStorage.length; index += 1) {
     const key = localStorage.key(index);
-    if (!key?.startsWith(clientPrefix) || key === apiBaseKey || key.startsWith(`${clientPrefix}pre-restore`)) continue;
+    if (!key?.startsWith(clientPrefix) || key === apiBaseKey || key === standaloneStateKey || key.startsWith(`${clientPrefix}pre-restore`)) continue;
     const value = localStorage.getItem(key);
     if (value !== null) result[key] = value;
   }

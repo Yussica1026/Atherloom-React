@@ -4,6 +4,8 @@ import type {
   BackupBundle,
   BackupPart,
   BackupRestoreResult,
+  McpServer,
+  McpServerDraft,
   Persona,
   PersonaDraft,
   Provider,
@@ -18,12 +20,19 @@ import { BackupSettings } from "./BackupSettings";
 import { PersonaSettings } from "./PersonaSettings";
 import { ProviderSettings } from "./ProviderSettings";
 import { WorldbookSettings } from "./WorldbookSettings";
+import { McpSettings } from "./McpSettings";
+import { MemorySettings } from "./MemorySettings";
+import { SummarySettings } from "./SummarySettings";
+import { ToolsSettings } from "./ToolsSettings";
+import { RuntimeSettings } from "./RuntimeSettings";
 
 interface SettingsPanelProps {
   open: boolean;
   providers: Provider[];
   personas: Persona[];
   worldbooks: Worldbook[];
+  mcpServers: McpServer[];
+  personaId: string | null;
   settings: AppSettings;
   theme: ThemeName;
   apiBase: string;
@@ -44,15 +53,25 @@ interface SettingsPanelProps {
   onDeleteWorldbook: (id: string) => Promise<void>;
   onExportBackup: (parts: BackupPart[]) => Promise<BackupBundle>;
   onRestoreBackup: (bundle: BackupBundle, parts: BackupPart[]) => Promise<BackupRestoreResult>;
+  onCreateMcpServer: (draft: McpServerDraft) => Promise<unknown>;
+  onUpdateMcpServer: (id: string, draft: McpServerDraft) => Promise<unknown>;
+  onDeleteMcpServer: (id: string) => Promise<void>;
+  onTestMcpServer: (draft: McpServerDraft) => Promise<{ message: string }>;
+  onRefreshMcpServer: (id: string) => Promise<unknown>;
 }
 
-type SettingsTab = "connection" | "providers" | "personas" | "worldbooks" | "backup" | "appearance";
+type SettingsTab = "connection" | "providers" | "personas" | "worldbooks" | "summary" | "memory" | "mcp" | "tools" | "runtime" | "backup" | "appearance";
 
 const tabs: Array<{ value: SettingsTab; label: string }> = [
   { value: "connection", label: "后端连接" },
   { value: "providers", label: "API 与网关" },
   { value: "personas", label: "人格指令" },
   { value: "worldbooks", label: "世界书" },
+  { value: "summary", label: "自动总结" },
+  { value: "memory", label: "记忆库" },
+  { value: "mcp", label: "MCP" },
+  { value: "tools", label: "工具与权限" },
+  { value: "runtime", label: "插件中心" },
   { value: "backup", label: "备份与恢复" },
   { value: "appearance", label: "外观" },
 ];
@@ -72,6 +91,8 @@ export function SettingsPanel({
   providers,
   personas,
   worldbooks,
+  mcpServers,
+  personaId,
   settings,
   theme,
   apiBase,
@@ -92,6 +113,11 @@ export function SettingsPanel({
   onDeleteWorldbook,
   onExportBackup,
   onRestoreBackup,
+  onCreateMcpServer,
+  onUpdateMcpServer,
+  onDeleteMcpServer,
+  onTestMcpServer,
+  onRefreshMcpServer,
 }: SettingsPanelProps) {
   const [tab, setTab] = useState<SettingsTab>("providers");
   const [connectionStatus, setConnectionStatus] = useState("");
@@ -180,12 +206,29 @@ export function SettingsPanel({
               onDelete={onDeleteWorldbook}
             /> : null}
 
+            {tab === "summary" ? <SummarySettings settings={settings} providers={providers} onSave={onSettingsChange} /> : null}
+
+            {tab === "memory" ? <MemorySettings personaKey={personaId || "__default__"} /> : null}
+
+            {tab === "mcp" ? <McpSettings servers={mcpServers} onCreate={onCreateMcpServer} onUpdate={onUpdateMcpServer} onDelete={onDeleteMcpServer} onTest={onTestMcpServer} onRefresh={onRefreshMcpServer} /> : null}
+
+            {tab === "tools" ? <ToolsSettings settings={settings} providers={providers} onSave={onSettingsChange} /> : null}
+
+            {tab === "runtime" ? <RuntimeSettings personaKey={personaId || "__default__"} personas={personas} providers={providers} worldbooks={worldbooks} mcpServers={mcpServers} onOpenMemory={() => setTab("memory")} onOpenMcp={() => setTab("mcp")} onOpenTools={() => setTab("tools")} /> : null}
+
             {tab === "backup" ? <BackupSettings onExport={onExportBackup} onRestore={onRestoreBackup} /> : null}
 
             {tab === "appearance" ? <section className="settings-section settings-feature">
               <div className="section-heading"><h3>外观</h3><p>跟随系统保留最初的暖米白与暖黑灰；水色、薄荷、丁香和腮红只是可选配色。</p></div>
               <label className="theme-setting">主题<select value={theme} onChange={(event) => onThemeChange(event.target.value as ThemeName)}>{themes.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
               <div className="theme-swatches">{themes.map((item) => <button type="button" key={item.value} className={`theme-swatch swatch-${item.value}${theme === item.value ? " active" : ""}`} onClick={() => onThemeChange(item.value)}><span /><strong>{item.label}</strong></button>)}</div>
+              <div className="appearance-options">
+                <label>用户名<input maxLength={40} defaultValue={String(settings.display_name || "")} onBlur={(event) => void onSettingsChange({ display_name: event.target.value.trim() })} /></label>
+                <label>字体大小 <small>{Math.round(Number(settings.font_scale || 100) > 5 ? Number(settings.font_scale || 100) : Number(settings.font_scale || 1) * 100)}%</small><input type="range" min="85" max="130" step="5" value={Math.round(Number(settings.font_scale || 100) > 5 ? Number(settings.font_scale || 100) : Number(settings.font_scale || 1) * 100)} onChange={(event) => void onSettingsChange({ font_scale: Number(event.target.value) })} /></label>
+                <label>消息密度<select defaultValue={String(settings.message_density || "comfortable")} onChange={(event) => void onSettingsChange({ message_density: event.target.value as AppSettings["message_density"] })}><option value="compact">紧凑</option><option value="comfortable">舒适</option><option value="relaxed">宽松</option></select></label>
+                <label>流式出字速度<select defaultValue={String(settings.stream_speed || "standard")} onChange={(event) => void onSettingsChange({ stream_speed: event.target.value })}><option value="slow">慢速</option><option value="standard">标准</option><option value="fast">快速</option></select></label>
+                <label>代码高亮主题<select defaultValue={String(settings.code_theme || "auto")} onChange={(event) => void onSettingsChange({ code_theme: event.target.value })}><option value="auto">跟随主题</option><option value="light">浅色</option><option value="dark">深色</option><option value="contrast">高对比度</option></select></label>
+              </div>
             </section> : null}
           </div>
         </div>

@@ -115,6 +115,18 @@ export interface Conversation {
   pinned?: boolean | number;
   starred?: boolean | number;
   archived?: boolean | number;
+  summary?: string;
+  archived_message_ids?: string[];
+}
+
+export interface Attachment {
+  id: string;
+  name: string;
+  mime: string;
+  kind: "image" | "text" | "pdf" | "file";
+  data?: string;
+  text?: string;
+  size: number;
 }
 
 export interface Usage {
@@ -137,7 +149,108 @@ export interface Message {
   created_at?: string;
   pending?: boolean;
   error?: boolean;
+  selected?: boolean | number;
+  attachments?: Attachment[];
+  tool_events?: ToolEvent[];
 }
+
+export interface ToolEvent {
+  type?: string;
+  name?: string;
+  tool_name?: string;
+  status?: string;
+  detail?: string;
+  query?: string;
+  result?: unknown;
+  [key: string]: unknown;
+}
+
+export interface Favorite {
+  id: string;
+  source_message_id: string;
+  source_conversation_id?: string;
+  role?: "user" | "assistant";
+  text_snapshot?: string;
+  conversation_title_snapshot?: string;
+  message_created_at?: string;
+  favorited_at?: string;
+  owners?: string[];
+}
+
+export type MemoryKind = "fact" | "preference" | "relationship" | "promise" | "event" | "emotion" | "summary" | "diary" | "other";
+
+export interface Memory {
+  id: string;
+  title: string;
+  content: string;
+  kind: MemoryKind;
+  persona_key: string;
+  importance: number;
+  confidence: number;
+  source_type: "explicit" | "inferred" | "summary" | string;
+  memory_status?: "active" | "candidate" | "forgotten" | "superseded" | string;
+  strength?: number;
+  effective_strength?: number;
+  starred?: boolean | number;
+  archived?: boolean | number;
+  deleted_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface MemoryDraft {
+  title: string;
+  content: string;
+  kind: MemoryKind;
+  persona_key: string;
+  importance: number;
+  confidence: number;
+  source_type: "explicit" | "inferred" | "summary" | string;
+}
+
+export interface MotivationThought {
+  id: string;
+  content: string;
+  source: string;
+  count: number;
+  obsession: boolean;
+}
+
+export interface MotivationPayload {
+  enabled: boolean;
+  offline_mode: "frozen" | "limited" | "full" | string;
+  catch_up_ticks?: number;
+  state: {
+    drives: Record<string, number>;
+    baselines: Record<string, number>;
+    thoughts: MotivationThought[];
+    tick_count: number;
+    last_tick: string;
+  };
+  drives: Record<string, { label: string; baseline: number; growth: number; decay: number; threshold: number }>;
+  events: string[];
+}
+
+export interface McpServer {
+  id: string;
+  name: string;
+  transport: "http" | "stdio";
+  url: string;
+  token?: string;
+  has_token?: boolean;
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+  headers?: Record<string, string>;
+  tool_policies?: Record<string, "allow" | "ask" | "deny">;
+  enabled: boolean;
+  tools?: Array<{ name: string; description?: string }>;
+  last_status?: string;
+  last_detail?: string;
+  last_tested_at?: string;
+}
+
+export type McpServerDraft = Omit<McpServer, "id" | "tools" | "last_status" | "last_detail" | "last_tested_at" | "has_token">;
 
 export interface AppSettings {
   display_name?: string;
@@ -156,6 +269,7 @@ export interface BootstrapPayload {
   conversations: Conversation[];
   worldbooks: Worldbook[];
   settings: AppSettings;
+  mcp_servers?: McpServer[];
 }
 
 export interface ChatRequest {
@@ -165,6 +279,11 @@ export interface ChatRequest {
   persona_id: string | null;
   reuse_user_message_id?: string | null;
   local_time?: string;
+  vision_provider_id?: string;
+  attachments?: Attachment[];
+  worldbook_ids?: string[];
+  media_context?: string;
+  typing_context?: string;
 }
 
 export interface ChatStreamEvent {
@@ -177,6 +296,7 @@ export interface ChatStreamEvent {
   title?: string;
   done?: boolean;
   error?: string;
+  tool_event?: ToolEvent;
   [key: string]: unknown;
 }
 

@@ -1,6 +1,7 @@
 package app.atherloom.react;
 
 import android.app.Activity;
+import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
@@ -217,6 +218,17 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public String setClipboard(String value) {
+            try {
+                ClipboardManager clipboard = (ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
+                clipboard.setPrimaryClip(ClipData.newPlainText("Atherloom", value == null ? "" : value));
+                return "{\"ok\":true}";
+            } catch (Exception error) {
+                return failure(error.getMessage());
+            }
+        }
+
+        @JavascriptInterface
         public String saveProvider(String raw) {
             try {
                 requireSecureStorage();
@@ -294,7 +306,8 @@ public class MainActivity extends Activity {
                             .put("system", "")
                             .put("messages", new JSONArray().put(new JSONObject().put("role", "user").put("content", "只回复 OK")))
                             .put("max_tokens", 16)
-                            .put("temperature", 0);
+                            .put("temperature", 0)
+                            .put("thinking_enabled", false);
                         directChat(probe);
                         response = new JSONObject().put("ok", true).put("message", "连接成功，模型已响应");
                     } else if ("chat".equals(operation)) {
@@ -407,8 +420,20 @@ public class MainActivity extends Activity {
 
         private JSONArray directListModels(JSONObject request) throws Exception {
             JSONObject provider = providerFromRequest(request);
-            String base = provider.getString("base_url").replaceAll("/+$", "");
-            String endpoint = base.endsWith("/models") ? base : base + "/models";
+            String protocol = provider.optString("protocol", "openai");
+            String base = provider.getString("base_url").replaceAll("/+$", "")
+                .replaceAll("/chat/completions$", "")
+                .replaceAll("/messages$", "");
+            String endpoint;
+            if (base.endsWith("/models")) {
+                endpoint = base;
+            } else if ("anthropic".equals(protocol) && !base.endsWith("/v1")) {
+                endpoint = base + "/v1/models";
+            } else if (base.matches("https?://api\\.openai\\.com")) {
+                endpoint = base + "/v1/models";
+            } else {
+                endpoint = base + "/models";
+            }
             HttpURLConnection connection = null;
             try {
                 connection = (HttpURLConnection) new URL(endpoint).openConnection();
@@ -441,10 +466,13 @@ public class MainActivity extends Activity {
         private JSONObject directChat(JSONObject request) throws Exception {
             JSONObject provider = providerFromRequest(request);
             String protocol = provider.optString("protocol", "openai");
-            String base = provider.getString("base_url").replaceAll("/+$", "");
+            String base = provider.getString("base_url").replaceAll("/+$", "")
+                .replaceAll("/chat/completions$", "")
+                .replaceAll("/messages$", "")
+                .replaceAll("/models$", "");
             String endpoint = "anthropic".equals(protocol)
-                ? (base.endsWith("/messages") ? base : base.endsWith("/v1") ? base + "/messages" : base + "/v1/messages")
-                : (base.endsWith("/chat/completions") ? base : base + "/chat/completions");
+                ? (base.endsWith("/v1") ? base + "/messages" : base + "/v1/messages")
+                : (base.matches("https?://api\\.openai\\.com") ? base + "/v1/chat/completions" : base + "/chat/completions");
             JSONArray messages = request.optJSONArray("messages");
             if (messages == null) messages = new JSONArray();
             JSONObject payload = new JSONObject()
@@ -453,6 +481,14 @@ public class MainActivity extends Activity {
                 .put("temperature", request.optDouble("temperature", provider.optDouble("temperature", 0.7)))
                 .put("top_p", request.optDouble("top_p", provider.optDouble("top_p", 1.0)))
                 .put("messages", messages);
+            JSONObject customBody = request.optJSONObject("custom_body");
+            if (customBody != null) {
+                for (Iterator<String> keys = customBody.keys(); keys.hasNext();) {
+                    String key = keys.next();
+                    if ("model".equals(key) || "messages".equals(key)) continue;
+                    payload.put(key, customBody.get(key));
+                }
+            }
             String system = request.optString("system");
             if ("anthropic".equals(protocol)) {
                 if (!system.isEmpty()) payload.put("system", system);
@@ -461,9 +497,8 @@ public class MainActivity extends Activity {
                 for (int index = 0; index < messages.length(); index++) withSystem.put(messages.get(index));
                 payload.put("messages", withSystem);
             }
-            boolean reasoningModel = "deepseek".equals(protocol) || "glm".equals(protocol)
-                || provider.optString("model").toLowerCase(java.util.Locale.ROOT).contains("deepseek");
-            if (reasoningModel && request.optBoolean("thinking_enabled", provider.optBoolean("thinking_enabled", true))) {
+            boolean explicitThinking = "glm".equals(protocol);
+            if (explicitThinking && request.optBoolean("thinking_enabled", provider.optBoolean("thinking_enabled", true))) {
                 payload.put("thinking", new JSONObject().put("type", "enabled"));
             }
 
@@ -477,6 +512,15 @@ public class MainActivity extends Activity {
                 connection.setRequestProperty("Accept", "application/json");
                 connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
                 applyProviderHeaders(connection, provider);
+                JSONObject customHeaders = request.optJSONObject("custom_headers");
+                if (customHeaders != null) {
+                    for (Iterator<String> keys = customHeaders.keys(); keys.hasNext();) {
+                        String header = keys.next();
+                        if ("authorization".equalsIgnoreCase(header) || "x-api-key".equalsIgnoreCase(header)
+                            || "content-type".equalsIgnoreCase(header)) continue;
+                        connection.setRequestProperty(header, customHeaders.optString(header));
+                    }
+                }
                 try (OutputStream output = connection.getOutputStream()) {
                     output.write(payload.toString().getBytes(StandardCharsets.UTF_8));
                 }
@@ -667,8 +711,18 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) webView.goBack();
-        else super.onBackPressed();
+        if (webView == null) {
+            super.onBackPressed();
+            return;
+        }
+        webView.evaluateJavascript(
+            "(function(){var e=new Event('atherloom:back',{cancelable:true});return !window.dispatchEvent(e);})()",
+            result -> {
+                if ("true".equals(result)) return;
+                if (webView.canGoBack()) webView.goBack();
+                else MainActivity.super.onBackPressed();
+            }
+        );
     }
 
     @Override

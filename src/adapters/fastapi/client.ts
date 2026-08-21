@@ -6,6 +6,12 @@ import type {
   ChatRequest,
   ChatStreamEvent,
   Conversation,
+  Favorite,
+  McpServer,
+  McpServerDraft,
+  Memory,
+  MemoryDraft,
+  MotivationPayload,
   AppSettings,
   Message,
   Persona,
@@ -21,6 +27,7 @@ import {
   completeStandaloneChat,
   isStandaloneAndroid,
   requestStandaloneJson,
+  updateStandaloneConversationTitle,
   type StandaloneChatResult,
 } from "../standalone/store";
 
@@ -63,10 +70,12 @@ function endpoint(path: string) {
 async function readError(response: Response) {
   const text = await response.text();
   try {
-    const payload = JSON.parse(text) as { detail?: string; error?: string };
-    return payload.detail || payload.error || `请求失败 ${response.status}`;
+    const payload = JSON.parse(text) as { detail?: unknown; error?: unknown };
+    const rawDetail = payload.detail ?? payload.error;
+    const detail = typeof rawDetail === "string" ? rawDetail : rawDetail == null ? "" : JSON.stringify(rawDetail);
+    return `HTTP ${response.status}${detail ? ` · ${detail}` : ""}`;
   } catch {
-    return text.trim() || `请求失败 ${response.status}`;
+    return `HTTP ${response.status}${text.trim() ? ` · ${text.trim()}` : ""}`;
   }
 }
 
@@ -242,7 +251,7 @@ export const fastApi = {
       method: "POST",
       body: JSON.stringify({ provider_id: providerId, persona_id: personaId }),
     }),
-  updateConversation: (conversationId: string, patch: { title: string }) =>
+  updateConversation: (conversationId: string, patch: { title?: string; provider_id?: string | null }) =>
     requestJson<Conversation>(`/api/conversations/${encodeURIComponent(conversationId)}`, { method: "PATCH", body: JSON.stringify(patch) }),
   updateConversationState: (conversationId: string, patch: Partial<Pick<Conversation, "pinned" | "starred" | "archived">>) =>
     requestJson<Conversation>(`/api/conversations/${encodeURIComponent(conversationId)}/state`, { method: "PATCH", body: JSON.stringify(patch) }),
@@ -250,6 +259,62 @@ export const fastApi = {
     requestJson<{ deleted: boolean }>(`/api/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE" }),
   searchConversations: (query: string) =>
     requestJson<Conversation[]>(`/api/search?q=${encodeURIComponent(query)}`),
+  branchConversation: (conversationId: string, messageId: string) =>
+    requestJson<Conversation>(`/api/conversations/${encodeURIComponent(conversationId)}/branch/${encodeURIComponent(messageId)}`, { method: "POST" }),
+  compressConversation: (conversationId: string, rounds: number, providerId: string) =>
+    requestJson<{ ok: boolean; rounds: number; messages: number; summary: string; available_rounds: number }>(`/api/conversations/${encodeURIComponent(conversationId)}/compress`, {
+      method: "POST",
+      body: JSON.stringify({ rounds, provider_id: providerId }),
+    }),
+  editMessage: (messageId: string, content: string) =>
+    requestJson<Message>(`/api/messages/${encodeURIComponent(messageId)}`, { method: "PATCH", body: JSON.stringify({ content }) }),
+  selectMessageVersion: (conversationId: string, parentMessageId: string, assistantMessageId: string) =>
+    requestJson<{ ok: boolean }>("/api/messages/selection", {
+      method: "PATCH",
+      body: JSON.stringify({ conversation_id: conversationId, parent_message_id: parentMessageId, assistant_message_id: assistantMessageId }),
+    }),
+  deleteMessageVersion: (messageId: string) =>
+    requestJson<{ ok: boolean; deleted: string[] }>(`/api/messages/${encodeURIComponent(messageId)}`, { method: "DELETE" }),
+  deleteAllMessageVersions: (messageId: string) =>
+    requestJson<{ ok: boolean; deleted: string[]; parent_message_id: string }>(`/api/messages/${encodeURIComponent(messageId)}/versions`, { method: "DELETE" }),
+  listFavorites: (query = "") => requestJson<Favorite[]>(`/api/favorites?q=${encodeURIComponent(query)}`),
+  favoriteMessage: (messageId: string) =>
+    requestJson<{ id: string; source_message_id: string; owner: string }>(`/api/favorites/${encodeURIComponent(messageId)}`, { method: "POST", body: JSON.stringify({ owner: "user" }) }),
+  unfavoriteMessage: (messageId: string) =>
+    requestJson<{ ok: boolean }>(`/api/favorites/${encodeURIComponent(messageId)}?owner=user`, { method: "DELETE" }),
+  listMemories: (personaKey: string, query = "", includeArchived = false, includeTrash = false) =>
+    requestJson<Memory[]>(`/api/memories?persona_key=${encodeURIComponent(personaKey)}&q=${encodeURIComponent(query)}&include_archived=${includeArchived ? "true" : "false"}&include_trash=${includeTrash ? "true" : "false"}`),
+  createMemory: (draft: MemoryDraft) =>
+    requestJson<Memory>("/api/memories", { method: "POST", body: JSON.stringify(draft) }),
+  updateMemory: (id: string, draft: MemoryDraft) =>
+    requestJson<Memory>(`/api/memories/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(draft) }),
+  updateMemoryState: (id: string, patch: { starred?: boolean; archived?: boolean; trash?: boolean }) =>
+    requestJson<Memory>(`/api/memories/${encodeURIComponent(id)}/state`, { method: "PATCH", body: JSON.stringify(patch) }),
+  confirmMemory: (id: string, accept: boolean) =>
+    requestJson<Memory>(`/api/memories/${encodeURIComponent(id)}/confirm?accept=${accept ? "true" : "false"}`, { method: "POST", body: "{}" }),
+  organizeMemories: async (personaKey: string) => {
+    const lifecycle = await requestJson<{ processed: number; faded: number; forgotten: number }>(`/api/memories/lifecycle?persona_key=${encodeURIComponent(personaKey)}`, { method: "POST", body: "{}" });
+    const consolidated = await requestJson<{ clusters: number; candidates_created: number; memory_ids: string[] }>(`/api/memories/consolidate?persona_key=${encodeURIComponent(personaKey)}`, { method: "POST", body: "{}" });
+    return { lifecycle, consolidated };
+  },
+  getMotivation: (personaKey: string) =>
+    requestJson<MotivationPayload>(`/api/motivation/${encodeURIComponent(personaKey)}`),
+  setMotivationEnabled: (personaKey: string, enabled: boolean, offlineMode: string) =>
+    requestJson<MotivationPayload>(`/api/motivation/${encodeURIComponent(personaKey)}/enabled`, { method: "PUT", body: JSON.stringify({ enabled, offline_mode: offlineMode }) }),
+  tickMotivation: (personaKey: string) =>
+    requestJson<MotivationPayload>(`/api/motivation/${encodeURIComponent(personaKey)}/tick`, { method: "POST", body: "{}" }),
+  resetMotivation: (personaKey: string) =>
+    requestJson<MotivationPayload>(`/api/motivation/${encodeURIComponent(personaKey)}/reset`, { method: "POST", body: "{}" }),
+  createMcpServer: (draft: McpServerDraft) =>
+    requestJson<McpServer>("/api/mcp-servers", { method: "POST", body: JSON.stringify(draft) }),
+  updateMcpServer: (id: string, draft: McpServerDraft) =>
+    requestJson<McpServer>(`/api/mcp-servers/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(draft) }),
+  deleteMcpServer: (id: string) =>
+    requestJson<{ ok: boolean }>(`/api/mcp-servers/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  testMcpServer: (draft: McpServerDraft) =>
+    requestJson<{ ok: boolean; tool_count: number; tools: McpServer["tools"]; message: string }>("/api/mcp-servers/test", { method: "POST", body: JSON.stringify(draft) }),
+  refreshMcpServer: (id: string) =>
+    requestJson<McpServer>(`/api/mcp-servers/${encodeURIComponent(id)}/refresh`, { method: "POST", body: "{}" }),
   createProvider: (draft: ProviderDraft) =>
     requestJson<Provider>("/api/providers", { method: "POST", body: JSON.stringify(draft) }),
   updateProvider: (id: string, draft: ProviderDraft) =>
@@ -300,6 +365,21 @@ export async function streamChat(
     const result = await requestNativeProvider<StandaloneChatResult>("chat", context.operation);
     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
     const saved = completeStandaloneChat(context, result);
+    if (context.autoTitleMode === "model" && (!saved.title || saved.title === "新对话")) {
+      try {
+        const named = await requestNativeProvider<StandaloneChatResult>("chat", {
+          ...context.operation,
+          system: "请为这段新对话生成一个不超过18个汉字的简洁标题。只回复标题，不要引号和解释。",
+          messages: [{ role: "user", content: context.userMessage.content }, { role: "assistant", content: saved.assistantMessage.content.slice(0, 1200) }],
+          max_tokens: 40,
+          temperature: 0.2,
+          thinking_enabled: false,
+        });
+        saved.title = updateStandaloneConversationTitle(context.conversation.id, String(named.content || ""));
+      } catch {
+        // Naming is optional and must never discard a completed assistant reply.
+      }
+    }
     onEvent({
       assistant_id: saved.assistantMessage.id,
       delta: saved.assistantMessage.content,

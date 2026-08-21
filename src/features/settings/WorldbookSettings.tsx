@@ -1,5 +1,6 @@
 import { useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import type { Worldbook, WorldbookDraft, WorldbookEntry } from "../../domain/types";
+import { saveFile } from "../../adapters/native/files";
 
 interface WorldbookSettingsProps {
   worldbooks: Worldbook[];
@@ -112,14 +113,14 @@ export function WorldbookSettings({ worldbooks, onCreate, onUpdate, onDelete }: 
     }
   };
 
-  const exportWorldbooks = () => {
+  const exportWorldbooks = async () => {
     const blob = new Blob([JSON.stringify({ format: "atherloom-worldbooks", version: 1, worldbooks }, null, 2)], { type: "application/json" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `atherloom-worldbooks-${new Date().toISOString().slice(0, 10)}.json`;
-    link.click();
-    URL.revokeObjectURL(link.href);
-    setStatus(`已导出 ${worldbooks.length} 本世界书`);
+    try {
+      const message = await saveFile(`atherloom-worldbooks-${new Date().toISOString().slice(0, 10)}.json`, blob);
+      setStatus(`${message}；共 ${worldbooks.length} 本世界书`);
+    } catch (error) {
+      setStatus(`导出失败：${error instanceof Error ? error.message : "无法保存文件"}`);
+    }
   };
 
   const importWorldbooks = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -153,7 +154,7 @@ export function WorldbookSettings({ worldbooks, onCreate, onUpdate, onDelete }: 
         <div><h3 id="worldbooks-title">世界书</h3><p>保存可复用的背景、规则与预设，在每个聊天窗口中按需注入。</p></div>
         <div className="heading-actions">
           <button className="secondary-button" type="button" onClick={() => importRef.current?.click()}>导入</button>
-          <button className="secondary-button" type="button" onClick={exportWorldbooks}>导出</button>
+          <button className="secondary-button" type="button" onClick={() => void exportWorldbooks()}>导出</button>
           <button className="primary-button compact-action" type="button" onClick={openNew}>添加世界书</button>
         </div>
         <input ref={importRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importWorldbooks(event)} />

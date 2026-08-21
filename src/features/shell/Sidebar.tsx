@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type TouchEvent } from "react";
 import type { Conversation, Persona } from "../../domain/types";
 import { PlusIcon, SearchIcon } from "../../components/Icons";
+import type { FeatureSpace } from "../spaces/FeatureHub";
 
 interface SidebarProps {
   conversations: Conversation[];
@@ -16,7 +17,9 @@ interface SidebarProps {
   onRenameConversation: (id: string, title: string) => Promise<unknown>;
   onUpdateConversationState: (id: string, patch: Partial<Pick<Conversation, "pinned" | "starred" | "archived">>) => Promise<unknown>;
   onDeleteConversation: (id: string) => Promise<void>;
+  onClearPersonaConversations: () => Promise<void>;
   onOpenSettings: () => void;
+  onOpenSpace: (space: FeatureSpace) => void;
   onClose: () => void;
 }
 
@@ -211,7 +214,9 @@ export function Sidebar({
   onRenameConversation,
   onUpdateConversationState,
   onDeleteConversation,
+  onClearPersonaConversations,
   onOpenSettings,
+  onOpenSpace,
   onClose,
 }: SidebarProps) {
   const [revealedId, setRevealedId] = useState<string | null>(null);
@@ -246,6 +251,26 @@ export function Sidebar({
         ))}
       </nav>
 
+      <div className="sidebar-spaces">
+        <div className="sidebar-space-primary">
+          <button type="button" onClick={() => onOpenSpace("favorites")}>☆ 珍藏</button>
+          <button type="button" onClick={() => onOpenSpace("life")}>▥ 生活簿</button>
+          <button type="button" onClick={() => onOpenSpace("correspondence")}>✉ 往来</button>
+        </div>
+        <details>
+          <summary>共享与创作空间</summary>
+          <div>
+            <button type="button" onClick={() => onOpenSpace("reading")}>▤ 一起读书</button>
+            <button type="button" onClick={() => onOpenSpace("cinema")}>▷ 一起看电影</button>
+            <button type="button" onClick={() => onOpenSpace("listening")}>♪ 一起听歌</button>
+            <button type="button" onClick={() => onOpenSpace("roleplay")}>⌘ 角色剧场</button>
+            <button type="button" onClick={() => onOpenSpace("journal")}>▱ 日记</button>
+            <button type="button" onClick={() => onOpenSpace("board")}>□ 留言板</button>
+            <button type="button" onClick={() => onOpenSpace("dream")}>☾ 梦库</button>
+          </div>
+        </details>
+      </div>
+
       <label className="sidebar-search">
         <SearchIcon />
         <input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索当前人格的对话" aria-label="搜索当前人格的对话" />
@@ -271,6 +296,10 @@ export function Sidebar({
           </section>
         ))}
         {!conversations.length ? <p className="sidebar-empty">当前人格还没有对话</p> : null}
+        {conversations.length ? <button className="clear-persona-chats" type="button" onClick={() => {
+          if (!window.confirm(`清空当前人格的全部 ${conversations.length} 条对话？聊天正文、回答版本和对应珍藏会一并删除，其他人格不受影响。`)) return;
+          void onClearPersonaConversations().catch((error) => window.alert(error instanceof Error ? error.message : "清空失败"));
+        }}>清空当前人格全部对话（{conversations.length}）</button> : null}
       </nav>
 
       <button className="profile-row" type="button" onClick={onOpenSettings} aria-label="打开设置">

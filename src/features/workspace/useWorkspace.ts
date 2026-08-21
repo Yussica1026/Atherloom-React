@@ -74,6 +74,22 @@ function providerDraft(provider: Provider, model = provider.model): ProviderDraf
   };
 }
 
+function parsePrivateJournal(value: string, personaName: string) {
+  const normalized = value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+  const candidate = normalized.match(/\{[\s\S]*\}/)?.[0] || "";
+  if (candidate) {
+    try {
+      const parsed = JSON.parse(candidate) as { title?: unknown; content?: unknown };
+      const content = String(parsed.content || "").trim();
+      if (content) return { title: String(parsed.title || "").trim().slice(0, 120) || `${personaName}的一页日记`, content: content.slice(0, 30000) };
+    } catch {
+      // Some models still wrap valid diary prose around malformed JSON; preserve the prose below.
+    }
+  }
+  if (!normalized) throw new Error("模型没有返回日记内容");
+  return { title: `${personaName}的日记 · ${new Date().toLocaleDateString("zh-CN")}`, content: normalized.slice(0, 30000) };
+}
+
 export function useWorkspace() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
@@ -95,6 +111,7 @@ export function useWorkspace() {
   const settingsRevisionRef = useRef(0);
   const hydratePromiseRef = useRef<Promise<void> | null>(null);
   const personaRequestRef = useRef(0);
+  const privateGenerationRef = useRef(false);
 
   const hydrate = useCallback(async () => {
     if (hydratePromiseRef.current) return hydratePromiseRef.current;
@@ -456,6 +473,7 @@ export function useWorkspace() {
         attachments,
         worldbook_ids: worldbookIds,
         typing_context: reuseUserMessageId ? "" : typingContext,
+        thinking_enabled: provider?.thinking_enabled !== false,
       }, controller.signal, (event) => {
         if (event.error) throw new Error(event.error);
         assistantText += event.delta || "";
@@ -501,6 +519,56 @@ export function useWorkspace() {
     runGeneration(content, null, attachments, worldbookIds, typingContext)
   ), [runGeneration]);
 
+  const generatePrivateJournal = useCallback(async (targetPersonaKey: string, trigger: "manual" | "scheduled" | "catch_up", guidance = "") => {
+    if (busy) throw new Error("当前聊天正在生成，请稍后再写日记");
+    if (privateGenerationRef.current) throw new Error("已有一篇私人日记正在生成");
+    const targetPersonaId = targetPersonaKey === "__default__" ? null : targetPersonaKey;
+    const targetPersona = targetPersonaId ? personas.find((item) => item.id === targetPersonaId) || null : null;
+    if (targetPersonaId && !targetPersona) throw new Error("日记计划所属人格已不存在");
+    const targetProviderId = targetPersona?.config?.provider_id || targetPersona?.provider_id || (targetPersonaId === personaId ? providerId : null) || providers.find((item) => item.enabled !== false)?.id || null;
+    if (!targetProviderId) throw new Error("请先为这个人格选择可用的 API 线路");
+
+    privateGenerationRef.current = true;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 180_000);
+    let temporary: Conversation | null = null;
+    let output = "";
+    try {
+      temporary = await fastApi.createConversation(targetProviderId, targetPersonaId);
+      const triggerLabel = trigger === "manual" ? "你此刻主动想写" : trigger === "catch_up" ? "应用重新打开后补写错过的时段" : "到了你预定的写作时间";
+      const prompt = [
+        "【AI 私人日记写作】",
+        `现在是${new Date().toLocaleString("zh-CN", { hour12: false })}，${triggerLabel}。`,
+        "请以你自己、也就是当前人格的第一人称写一篇真正属于你的日记。它不是回复用户，不要问候、解释任务或提到系统提示。可以回望你能读取的共同经历、记忆与既有日记，也可以诚实记录此刻没有大事发生。不要虚构你看不到的现实事件。",
+        guidance.trim() ? `这次可参考的私人写作上下文：\n${guidance.trim().slice(0, 5000)}` : "这次没有额外写作线索，请自行决定最想留下的内容。",
+        "只输出 JSON 对象，不要 Markdown 代码围栏：{\"title\":\"简短标题\",\"content\":\"日记正文\"}",
+      ].join("\n");
+      await streamChat({
+        conversation_id: temporary.id,
+        content: prompt,
+        provider_id: targetProviderId,
+        persona_id: targetPersonaId,
+        local_time: localTimeContext(),
+        attachments: [],
+        worldbook_ids: [],
+        typing_context: "",
+        thinking_enabled: false,
+      }, controller.signal, (event) => {
+        if (event.error) throw new Error(event.error);
+        output += event.delta || "";
+      });
+      if (controller.signal.aborted) throw new Error("私人日记生成超时，请稍后重试");
+      return parsePrivateJournal(output, targetPersona?.name || "默认人格");
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error("私人日记生成超时，请稍后重试");
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+      privateGenerationRef.current = false;
+      if (temporary) await fastApi.deleteConversation(temporary.id).catch(() => undefined);
+    }
+  }, [busy, personaId, personas, providerId, providers]);
+
   const regenerateMessage = useCallback(async (message: Message) => {
     const userId = message.role === "user" ? message.id : message.parent_message_id;
     if (!userId) throw new Error("这条消息还没有保存，暂时不能重新 Roll");
@@ -536,6 +604,15 @@ export function useWorkspace() {
     }
     return savedProvider;
   }, [currentId, providers, setProviderId]);
+
+  const setProviderStreamMode = useCallback(async (enabled: boolean) => {
+    if (busy) throw new Error("请先停止当前生成，再切换输出方式");
+    const provider = providers.find((item) => item.id === providerId);
+    if (!provider) throw new Error("当前没有可修改的模型线路");
+    const saved = await fastApi.updateProvider(provider.id, { ...providerDraft(provider), stream_enabled: enabled });
+    setProviders((current) => current.map((item) => item.id === provider.id ? saved : item));
+    return saved;
+  }, [busy, providerId, providers]);
 
   const selectMessageVersion = useCallback(async (parentMessageId: string, assistantMessageId: string) => {
     if (!currentId) throw new Error("当前没有打开的对话");
@@ -793,6 +870,7 @@ export function useWorkspace() {
     error,
     setProviderId,
     selectProviderModel,
+    setProviderStreamMode,
     setPersonaId: selectPersona,
     openConversation,
     createConversation,
@@ -821,6 +899,7 @@ export function useWorkspace() {
     exportBackup,
     restoreBackup,
     send,
+    generatePrivateJournal,
     regenerateMessage,
     editMessage,
     selectMessageVersion,

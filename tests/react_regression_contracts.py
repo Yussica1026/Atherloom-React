@@ -126,6 +126,45 @@ class LegacyRegressionContracts(unittest.TestCase):
         self.assertNotIn("skipWaiting", worker)
         self.assertNotIn("location.reload", worker)
 
+    def test_private_journal_uses_temporary_hidden_conversation_and_audit(self):
+        workspace = source("src/features/workspace/useWorkspace.ts")
+        hub = source("src/features/spaces/FeatureHub.tsx")
+        block = workspace[workspace.index("const generatePrivateJournal"):workspace.index("const regenerateMessage")]
+        self.assertIn("fastApi.createConversation(targetProviderId, targetPersonaId)", block)
+        self.assertIn("fastApi.deleteConversation(temporary.id)", block)
+        self.assertNotIn("setMessages", block)
+        self.assertIn('status: "started"', hub)
+        self.assertIn('status: "success"', hub)
+        self.assertIn('status: "failed"', hub)
+        self.assertIn('trigger: JournalTrigger = overdue', hub)
+
+    def test_android_standalone_honors_stream_and_reasoning_modes(self):
+        client = source("src/adapters/fastapi/client.ts")
+        store = source("src/adapters/standalone/store.ts")
+        native = source("android/app/src/main/java/app/atherloom/react/MainActivity.java")
+        messages = source("src/features/chat/MessageList.tsx")
+        self.assertIn("context.operation.stream_enabled", client)
+        self.assertIn("providerChatStream", client)
+        self.assertIn("stream_enabled: provider.stream_enabled !== false", store)
+        self.assertIn("runProviderChatStream", native)
+        self.assertIn('output.put("reasoning_delta", reasoning)', native)
+        self.assertIn("useState(true)", messages)
+        self.assertIn("思考过程（点击收起）", messages)
+
+    def test_legacy_sidebar_and_transient_export_notice_are_preserved(self):
+        sidebar = source("src/features/shell/Sidebar.tsx")
+        app = source("src/app/App.tsx")
+        panel = source("src/features/settings/SettingsPanel.tsx")
+        self.assertLess(sidebar.index('onOpenSpace("favorites")'), sidebar.index('aria-label="人格工作区"'))
+        self.assertIn("共创空间", sidebar)
+        self.assertIn("日记与留言", sidebar)
+        self.assertIn('setTimeout(() => setAttachmentStatus(""), 6_000)', app)
+        self.assertIn('aria-label="关闭提示"', app)
+        self.assertIn("displayNameDraft", panel)
+        self.assertIn("保存用户名", panel)
+        self.assertIn('displayName ? displayName.slice(0, 1).toUpperCase() : "·"', sidebar)
+        self.assertIn("settings: {}", source("src/adapters/standalone/store.ts"))
+
 
 if __name__ == "__main__":
     unittest.main()

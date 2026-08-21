@@ -242,6 +242,39 @@ function streamChatNative(
   });
 }
 
+function streamProviderNative(
+  request: unknown,
+  signal: AbortSignal,
+  onEvent: (event: ChatStreamEvent) => void,
+) {
+  const bridge = window.AtherloomNative;
+  if (!bridge?.providerChatStream) throw new Error("当前 APK 不支持本机流式输出，请安装最新版本");
+  const callbackId = `provider-chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise<void>((resolve, reject) => {
+    const abort = () => {
+      bridge.cancelStream(callbackId);
+      cleanup();
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    const cleanup = () => {
+      signal.removeEventListener("abort", abort);
+      nativeStreams.delete(callbackId);
+    };
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+    nativeStreams.set(callbackId, { onEvent, resolve, reject, cleanup });
+    signal.addEventListener("abort", abort, { once: true });
+    try {
+      bridge.providerChatStream!(JSON.stringify(request), callbackId);
+    } catch (error) {
+      cleanup();
+      reject(error instanceof Error ? error : new Error("无法启动 Android 本机流式请求"));
+    }
+  });
+}
+
 export const fastApi = {
   bootstrap: () => requestJson<BootstrapPayload>("/api/bootstrap"),
   conversationMessages: (conversationId: string) =>
@@ -362,7 +395,24 @@ export async function streamChat(
     const context = beginStandaloneChat(request);
     onEvent({ user_id: context.userMessage.id });
     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
-    const result = await requestNativeProvider<StandaloneChatResult>("chat", context.operation);
+    let streamed = false;
+    let result: StandaloneChatResult;
+    if (context.operation.stream_enabled && window.AtherloomNative?.providerChatStream) {
+      streamed = true;
+      const collected: StandaloneChatResult = { content: "", reasoning: "" };
+      await streamProviderNative(context.operation, signal, (event) => {
+        if (event.error) throw new Error(event.error);
+        if (event.delta) collected.content = `${collected.content || ""}${event.delta}`;
+        if (event.reasoning_delta) collected.reasoning = `${collected.reasoning || ""}${event.reasoning_delta}`;
+        if (event.model) collected.model = String(event.model);
+        if (event.usage) collected.usage = event.usage;
+        if (!event.done) onEvent(event);
+      });
+      if (!String(collected.content || "").trim() && String(collected.reasoning || "").trim()) collected.content = collected.reasoning;
+      result = collected;
+    } else {
+      result = await requestNativeProvider<StandaloneChatResult>("chat", context.operation);
+    }
     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
     const saved = completeStandaloneChat(context, result);
     if (context.autoTitleMode === "model" && (!saved.title || saved.title === "新对话")) {
@@ -382,8 +432,8 @@ export async function streamChat(
     }
     onEvent({
       assistant_id: saved.assistantMessage.id,
-      delta: saved.assistantMessage.content,
-      reasoning_delta: saved.assistantMessage.reasoning,
+      delta: streamed ? "" : saved.assistantMessage.content,
+      reasoning_delta: streamed ? "" : saved.assistantMessage.reasoning,
       usage: saved.assistantMessage.usage,
       title: saved.title,
       done: true,

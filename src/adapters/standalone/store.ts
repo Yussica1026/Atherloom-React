@@ -48,6 +48,7 @@ export interface StandaloneChatContext {
     temperature: number;
     top_p: number;
     thinking_enabled: boolean;
+    stream_enabled: boolean;
     custom_headers?: Record<string, unknown>;
     custom_body?: Record<string, unknown>;
   };
@@ -948,6 +949,7 @@ export function beginStandaloneChat(request: ChatRequest): StandaloneChatContext
       temperature: provider.temperature ?? 0.7,
       top_p: provider.top_p ?? 1,
       thinking_enabled: provider.thinking_enabled !== false,
+      stream_enabled: provider.stream_enabled !== false,
       custom_headers: persona?.config?.custom_headers,
       custom_body: persona?.config?.custom_body,
     },

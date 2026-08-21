@@ -44,4 +44,7 @@
 - TypeScript typecheck 与 production build：通过（304 个模块）。
 - 旧版错误结构契约：17 项通过。
 - 开发服务器与 production preview 各完成一轮真实 Playwright smoke；桌面与 390×844 手机视口均通过，浏览器控制台与页面错误为 0。
-- Android 本机没有 Gradle CLI，固定签名 APK 交由 GitHub Actions 构建；发布后仍需核验证书指纹、包名、Release 附件与直接下载 HTTP 200。
+- Android 本机没有 Gradle CLI，固定签名 APK 由 GitHub Actions `32449259994` 构建成功。
+- `v0.2.0` Release 已公开：APK 3,025,788 字节，包名 `app.atherloom.react`，versionCode `6`，versionName `0.2.0-react-release`。
+- 固定证书 SHA-256 指纹核对通过；APK SHA-256 为 `21db7f38396007940286eac63273427671363c04ecf2dc0f1d8f4b9da6b5b697`。
+- 免登录直链已实测 HTTP 200：<https://github.com/Yussica1026/Atherloom-React/releases/download/v0.2.0/Atherloom-React-Android-release.apk>。

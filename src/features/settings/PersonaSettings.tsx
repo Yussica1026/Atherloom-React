@@ -34,6 +34,29 @@ interface PersonaFormState {
   mcpServers: string;
 }
 
+interface SwitchControlProps {
+  label: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange?: (checked: boolean) => void;
+}
+
+function SwitchControl({ label, checked, disabled = false, onChange }: SwitchControlProps) {
+  return (
+    <button
+      className="switch"
+      type="button"
+      role="switch"
+      aria-label={label}
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onChange?.(!checked)}
+    >
+      <span aria-hidden="true" />
+    </button>
+  );
+}
+
 const panes: Array<{ value: PersonaPane; label: string }> = [
   { value: "basic", label: "基础设置" },
   { value: "prompt", label: "提示词" },
@@ -142,6 +165,7 @@ export function PersonaSettings({ personas, providers, settings, onSettingsChang
   const [activePane, setActivePane] = useState<PersonaPane>("basic");
   const [form, setForm] = useState<PersonaFormState>(emptyForm);
   const [busy, setBusy] = useState(false);
+  const [globalBusy, setGlobalBusy] = useState(false);
   const [status, setStatus] = useState("");
   const templateRef = useRef<HTMLTextAreaElement>(null);
 
@@ -193,12 +217,16 @@ export function PersonaSettings({ personas, providers, settings, onSettingsChang
   };
 
   const toggleGlobal = async (patch: Partial<AppSettings>, pendingText: string) => {
+    if (globalBusy) return;
+    setGlobalBusy(true);
     setStatus(pendingText);
     try {
       await onSettingsChange(patch);
       setStatus("设置已保存");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "设置保存失败");
+    } finally {
+      setGlobalBusy(false);
     }
   };
 
@@ -222,11 +250,11 @@ export function PersonaSettings({ personas, providers, settings, onSettingsChang
 
       <div className="setting-row">
         <div><strong>允许助手主动提问</strong><small>开启后，助手可以自然追问、发起话题或给出选项；关闭后会尽量直接回答。</small></div>
-        <label className="switch"><input aria-label="允许助手主动提问" type="checkbox" checked={Boolean(settings.proactive_questions)} onChange={(event) => void toggleGlobal({ proactive_questions: event.target.checked }, "正在保存主动提问设置…")} /><span /></label>
+        <SwitchControl label="允许助手主动提问" checked={Boolean(settings.proactive_questions)} disabled={globalBusy} onChange={(checked) => void toggleGlobal({ proactive_questions: checked }, "正在保存主动提问设置…")} />
       </div>
       <div className="setting-row">
         <div><strong>共享正在输入状态</strong><small>只传递开始输入、停顿与耗时，不会读取或发送尚未发出的正文。</small></div>
-        <label className="switch"><input aria-label="共享正在输入状态" type="checkbox" checked={settings.typing_presence_enabled !== false} onChange={(event) => void toggleGlobal({ typing_presence_enabled: event.target.checked }, "正在保存输入状态设置…")} /><span /></label>
+        <SwitchControl label="共享正在输入状态" checked={settings.typing_presence_enabled !== false} disabled={globalBusy} onChange={(checked) => void toggleGlobal({ typing_presence_enabled: checked }, "正在保存输入状态设置…")} />
       </div>
 
       <form className="settings-form settings-edit-card persona-form" onSubmit={submit}>
@@ -237,7 +265,7 @@ export function PersonaSettings({ personas, providers, settings, onSettingsChang
 
         {activePane === "basic" ? <div className="persona-pane span-all">
           <label>助手名称<input required value={form.name} onChange={(event) => update("name", event.target.value)} placeholder="例如：私人助手" /></label>
-          <div className="setting-row"><div><strong>置顶人格</strong><small>置顶后显示在人格列表最上方。</small></div><label className="switch"><input aria-label="置顶人格" type="checkbox" checked={form.pinned} onChange={(event) => update("pinned", event.target.checked)} /><span /></label></div>
+          <div className="setting-row"><div><strong>置顶人格</strong><small>置顶后显示在人格列表最上方。</small></div><SwitchControl label="置顶人格" checked={form.pinned} onChange={(checked) => update("pinned", checked)} /></div>
           <div className="setting-row"><div><strong>专属模型线路</strong><small>新窗口默认使用这条线路，窗口内仍可单独切换。</small></div><select aria-label="专属模型线路" value={form.providerId} onChange={(event) => update("providerId", event.target.value)}><option value="">尚未绑定</option>{providers.map((provider) => <option value={provider.id} key={provider.id}>{provider.name} · {provider.model}</option>)}</select></div>
           <div className="setting-row"><div><strong>打开时进入</strong><small>进入人格时继续上次窗口或新建窗口。</small></div><select aria-label="打开人格时进入" value={form.startupChat} onChange={(event) => update("startupChat", event.target.value as PersonaFormState["startupChat"])}><option value="resume">继续上次对话</option><option value="new">自动新建对话</option></select></div>
         </div> : null}
@@ -250,8 +278,8 @@ export function PersonaSettings({ personas, providers, settings, onSettingsChang
         </div> : null}
 
         {activePane === "memory" ? <div className="persona-pane span-all">
-          <div className="setting-row"><div><strong>搜索人格记忆</strong><small>所有人格始终可以检索各自隔离的长期记忆。</small></div><label className="switch"><input aria-label="搜索人格记忆" type="checkbox" checked disabled /><span /></label></div>
-          <div className="setting-row"><div><strong>参考历史聊天记录</strong><small>关闭后只读取当前消息与人格提示词。</small></div><label className="switch"><input aria-label="参考历史聊天记录" type="checkbox" checked={form.historyEnabled} onChange={(event) => update("historyEnabled", event.target.checked)} /><span /></label></div>
+          <div className="setting-row"><div><strong>搜索人格记忆</strong><small>所有人格始终可以检索各自隔离的长期记忆。</small></div><SwitchControl label="搜索人格记忆" checked disabled /></div>
+          <div className="setting-row"><div><strong>参考历史聊天记录</strong><small>关闭后只读取当前消息与人格提示词。</small></div><SwitchControl label="参考历史聊天记录" checked={form.historyEnabled} onChange={(checked) => update("historyEnabled", checked)} /></div>
           <label>摘要更新频率（消息条数）<input type="number" min="1" max="200" value={form.summaryFrequency} onChange={(event) => update("summaryFrequency", Number(event.target.value))} /></label>
         </div> : null}
 

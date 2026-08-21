@@ -2,6 +2,27 @@ export const themeNames = ["system", "light", "dark", "water", "mint", "lilac", 
 
 export type ThemeName = (typeof themeNames)[number];
 
+export type BackupPart = "conversations" | "personas" | "memory" | "settings" | "games";
+
+export interface BackupBundle {
+  format: "atherloom-backup";
+  version: 2;
+  schema_version?: number;
+  exported_at: string;
+  parts: BackupPart[];
+  secrets_omitted?: string[];
+  tables: Record<string, Array<Record<string, unknown>>>;
+  client_data?: Record<string, string>;
+}
+
+export interface BackupRestoreResult {
+  ok: boolean;
+  parts: BackupPart[];
+  tables: Record<string, number>;
+  snapshot: string;
+  secrets_restored: boolean;
+}
+
 export function isThemeName(value: string | null): value is ThemeName {
   return themeNames.some((theme) => theme === value);
 }

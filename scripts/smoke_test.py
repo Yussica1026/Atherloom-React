@@ -88,10 +88,11 @@ def field(form, label: str, selector: str):
 
 def set_switch(page, label: str, checked: bool) -> None:
     control = page.get_by_label(label)
-    if control.is_checked() != checked:
-        control.locator("xpath=following-sibling::span").click()
+    current = control.get_attribute("aria-checked") == "true" if control.get_attribute("role") == "switch" else control.is_checked()
+    if current != checked:
+        control.click()
     page.wait_for_function(
-        "args => args.control.checked === args.checked",
+        "args => (args.control.matches('input') ? args.control.checked : args.control.getAttribute('aria-checked') === 'true') === args.checked",
         arg={"control": control.element_handle(), "checked": checked},
     )
 
@@ -290,6 +291,25 @@ with sync_playwright() as playwright:
     wait_card_gone(page, imported_worldbook_name)
     page.screenshot(path=artifacts / "settings-worldbook-desktop.png", full_page=True)
 
+    page.get_by_role("button", name="备份与恢复", exact=True).click()
+    page.get_by_role("heading", name="备份与恢复").wait_for()
+    with page.expect_download() as backup_download_info:
+        page.get_by_role("button", name="导出备份").click()
+    backup_download = backup_download_info.value
+    backup_file = artifacts / f"backup-e2e-{run_id}.json"
+    backup_download.save_as(backup_file)
+    backup_bundle = json.loads(backup_file.read_text(encoding="utf-8"))
+    assert backup_bundle["format"] == "atherloom-backup" and backup_bundle["version"] == 2
+    assert set(backup_bundle["parts"]) == {"conversations", "personas", "memory", "settings", "games"}
+    assert all(provider["api_key"] == "" and provider["custom_headers"] == "{}" for provider in backup_bundle["tables"]["providers"])
+    assert "atherloom-react:api-base" not in backup_bundle.get("client_data", {})
+    page.locator('.settings-section input[type="file"]').set_input_files(backup_file)
+    page.get_by_text("恢复完成；恢复前快照：", exact=False).wait_for()
+    page.wait_for_timeout(1200)
+    page.wait_for_load_state("networkidle")
+    page.get_by_role("button", name="打开设置").click()
+    page.get_by_role("heading", name="API 与网关").wait_for()
+
     page.get_by_role("button", name="外观", exact=True).click()
     swatches = page.locator(".theme-swatches")
     expected_themes = {
@@ -340,6 +360,34 @@ with sync_playwright() as playwright:
     page.get_by_role("button", name="发送").click()
     page.get_by_text("Atherloom React", exact=False).wait_for()
     page.locator(".conversation-title").get_by_text("React 设置验证", exact=True).wait_for()
+    page.get_by_role("button", name="打开菜单").click()
+    page.get_by_role("button", name="对话操作：React 设置验证").click()
+    managed_title = f"会话管理验证-{run_id}"
+    page.get_by_role("button", name="重命名").click()
+    page.get_by_label("对话名称").fill(managed_title)
+    page.get_by_role("button", name="保存名称").click()
+    page.get_by_role("button", name=managed_title, exact=True).wait_for()
+    page.get_by_role("button", name="置顶", exact=True).click()
+    page.get_by_role("heading", name="置顶", exact=True).wait_for()
+    page.get_by_role("button", name="星标", exact=True).click()
+    page.get_by_role("button", name="归档", exact=True).click()
+    page.get_by_role("heading", name="已归档", exact=True).wait_for()
+    page.get_by_role("button", name="取消归档", exact=True).click()
+    page.get_by_label("搜索当前人格的对话").fill(run_id)
+    managed_history = page.locator("button.history-item", has_text=managed_title)
+    managed_history.wait_for()
+    page.get_by_label("搜索当前人格的对话").fill("")
+    managed_history.click()
+    page.locator(".conversation-title").get_by_text(managed_title, exact=True).wait_for()
+    deleted_conversation_id = page.evaluate("localStorage.getItem('atherloom-react:last-conversation')")
+    saved_conversation = next(item for item in page.request.get(f"{base_url}/api/bootstrap").json()["conversations"] if item["id"] == deleted_conversation_id)
+    assert saved_conversation["title"] == managed_title and saved_conversation["pinned"] and saved_conversation["starred"] and not saved_conversation["archived"], saved_conversation
+    assert any(item["id"] == deleted_conversation_id for item in page.request.get(f"{base_url}/api/search?q={run_id}").json())
+    page.get_by_role("button", name="打开菜单").click()
+    page.get_by_role("button", name="删除这条对话").click()
+    managed_history.wait_for(state="detached")
+    backend_conversations = page.request.get(f"{base_url}/api/bootstrap").json()["conversations"]
+    assert deleted_conversation_id and all(item["id"] != deleted_conversation_id for item in backend_conversations)
     page.screenshot(path=artifacts / "react-mobile.png", full_page=True)
 
     browser.close()
@@ -357,6 +405,8 @@ print(json.dumps({
     "checks": [
         "provider create/edit/delete", "saved key preservation", "model fetch and native select", "provider test",
         "vision route", "persona eight panes/create/edit/delete", "worldbook entry/create/edit/delete/import/export",
+        "sanitized full backup and selective restore", "conversation delete against real backend",
+        "conversation rename/pin/star/archive and search",
         "seven themes", "old typography", "old launch animation", "mobile width", "chat stream",
     ],
 }, ensure_ascii=False, indent=2))

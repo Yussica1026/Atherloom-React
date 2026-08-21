@@ -1,6 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type {
   AppSettings,
+  BackupBundle,
+  BackupPart,
+  BackupRestoreResult,
   Persona,
   PersonaDraft,
   Provider,
@@ -11,6 +14,7 @@ import type {
   WorldbookDraft,
 } from "../../domain/types";
 import { CloseIcon } from "../../components/Icons";
+import { BackupSettings } from "./BackupSettings";
 import { PersonaSettings } from "./PersonaSettings";
 import { ProviderSettings } from "./ProviderSettings";
 import { WorldbookSettings } from "./WorldbookSettings";
@@ -38,15 +42,18 @@ interface SettingsPanelProps {
   onCreateWorldbook: (draft: WorldbookDraft) => Promise<unknown>;
   onUpdateWorldbook: (id: string, draft: WorldbookDraft) => Promise<unknown>;
   onDeleteWorldbook: (id: string) => Promise<void>;
+  onExportBackup: (parts: BackupPart[]) => Promise<BackupBundle>;
+  onRestoreBackup: (bundle: BackupBundle, parts: BackupPart[]) => Promise<BackupRestoreResult>;
 }
 
-type SettingsTab = "connection" | "providers" | "personas" | "worldbooks" | "appearance";
+type SettingsTab = "connection" | "providers" | "personas" | "worldbooks" | "backup" | "appearance";
 
 const tabs: Array<{ value: SettingsTab; label: string }> = [
   { value: "connection", label: "后端连接" },
   { value: "providers", label: "API 与网关" },
   { value: "personas", label: "人格指令" },
   { value: "worldbooks", label: "世界书" },
+  { value: "backup", label: "备份与恢复" },
   { value: "appearance", label: "外观" },
 ];
 
@@ -83,6 +90,8 @@ export function SettingsPanel({
   onCreateWorldbook,
   onUpdateWorldbook,
   onDeleteWorldbook,
+  onExportBackup,
+  onRestoreBackup,
 }: SettingsPanelProps) {
   const [tab, setTab] = useState<SettingsTab>("providers");
   const [connectionStatus, setConnectionStatus] = useState("");
@@ -163,6 +172,8 @@ export function SettingsPanel({
               onUpdate={onUpdateWorldbook}
               onDelete={onDeleteWorldbook}
             /> : null}
+
+            {tab === "backup" ? <BackupSettings onExport={onExportBackup} onRestore={onRestoreBackup} /> : null}
 
             {tab === "appearance" ? <section className="settings-section settings-feature">
               <div className="section-heading"><h3>外观</h3><p>跟随系统保留最初的暖米白与暖黑灰；水色、薄荷、丁香和腮红只是可选配色。</p></div>

@@ -1,5 +1,8 @@
 import type {
   BootstrapPayload,
+  BackupBundle,
+  BackupPart,
+  BackupRestoreResult,
   ChatRequest,
   ChatStreamEvent,
   Conversation,
@@ -60,18 +63,78 @@ async function readError(response: Response) {
   }
 }
 
+interface NativeResult {
+  ok?: boolean;
+  status?: number;
+  body?: string;
+  error?: string;
+}
+
+function readNativeResult<T>(raw: string): T {
+  let result: NativeResult;
+  try {
+    result = JSON.parse(raw) as NativeResult;
+  } catch {
+    throw new Error("Android 原生桥返回了无法识别的数据");
+  }
+  if (!result.ok) throw new Error(result.error || `请求失败 ${result.status || ""}`.trim());
+  try {
+    return JSON.parse(result.body || "null") as T;
+  } catch {
+    throw new Error("后端返回了无法识别的数据");
+  }
+}
+
+interface NativeRequestHandler {
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+}
+
+const nativeRequests = new Map<string, NativeRequestHandler>();
+
+if (typeof window !== "undefined") {
+  window.AtherloomNativeRequest = (callbackId, rawResult) => {
+    const handler = nativeRequests.get(callbackId);
+    if (!handler) return;
+    nativeRequests.delete(callbackId);
+    try {
+      handler.resolve(readNativeResult<unknown>(rawResult));
+    } catch (error) {
+      handler.reject(error instanceof Error ? error : new Error("Android 请求失败"));
+    }
+  };
+}
+
+function requestNativeJson<T>(method: string, path: string, body: string): Promise<T> {
+  const bridge = window.AtherloomNative;
+  if (!bridge) return Promise.reject(new Error("Android 原生桥不可用"));
+  if (!bridge.apiRequestAsync) {
+    try {
+      return Promise.resolve(readNativeResult<T>(bridge.apiRequest(method, path, body)));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+  const callbackId = `request-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise<T>((resolve, reject) => {
+    nativeRequests.set(callbackId, {
+      resolve: (value) => resolve(value as T),
+      reject,
+    });
+    try {
+      bridge.apiRequestAsync?.(method, path, body, callbackId);
+    } catch (error) {
+      nativeRequests.delete(callbackId);
+      reject(error instanceof Error ? error : new Error("无法启动 Android 请求"));
+    }
+  });
+}
+
 export async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (window.AtherloomNative) {
     const method = String(init.method || "GET").toUpperCase();
     const body = typeof init.body === "string" ? init.body : "";
-    const raw = window.AtherloomNative.apiRequest(method, path, body);
-    const result = JSON.parse(raw) as { ok?: boolean; status?: number; body?: string; error?: string };
-    if (!result.ok) throw new Error(result.error || `请求失败 ${result.status || ""}`.trim());
-    try {
-      return JSON.parse(result.body || "null") as T;
-    } catch {
-      throw new Error("后端返回了无法识别的数据");
-    }
+    return requestNativeJson<T>(method, path, body);
   }
   const response = await fetch(endpoint(path), {
     ...init,
@@ -158,6 +221,14 @@ export const fastApi = {
       method: "POST",
       body: JSON.stringify({ provider_id: providerId, persona_id: personaId }),
     }),
+  updateConversation: (conversationId: string, patch: { title: string }) =>
+    requestJson<Conversation>(`/api/conversations/${encodeURIComponent(conversationId)}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  updateConversationState: (conversationId: string, patch: Partial<Pick<Conversation, "pinned" | "starred" | "archived">>) =>
+    requestJson<Conversation>(`/api/conversations/${encodeURIComponent(conversationId)}/state`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteConversation: (conversationId: string) =>
+    requestJson<{ deleted: boolean }>(`/api/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE" }),
+  searchConversations: (query: string) =>
+    requestJson<Conversation[]>(`/api/search?q=${encodeURIComponent(query)}`),
   createProvider: (draft: ProviderDraft) =>
     requestJson<Provider>("/api/providers", { method: "POST", body: JSON.stringify(draft) }),
   updateProvider: (id: string, draft: ProviderDraft) =>
@@ -182,6 +253,10 @@ export const fastApi = {
     requestJson<Worldbook>(`/api/worldbooks/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(draft) }),
   deleteWorldbook: (id: string) =>
     requestJson<{ ok: boolean }>(`/api/worldbooks/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  exportBackup: (parts: BackupPart[]) =>
+    requestJson<BackupBundle>("/api/backup/export", { method: "POST", body: JSON.stringify({ parts }) }),
+  restoreBackup: (bundle: BackupBundle, parts: BackupPart[]) =>
+    requestJson<BackupRestoreResult>("/api/backup/restore", { method: "POST", body: JSON.stringify({ bundle, parts }) }),
 };
 
 function parseEventLine(line: string): ChatStreamEvent | null {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getApiBase, setApiBase } from "../adapters/fastapi/client";
-import { MenuIcon, SettingsIcon, SparkIcon } from "../components/Icons";
+import { MenuIcon, SparkIcon } from "../components/Icons";
 import { isThemeName, type ThemeName } from "../domain/types";
 import { Composer } from "../features/chat/Composer";
 import { MessageList } from "../features/chat/MessageList";
@@ -11,9 +11,14 @@ import "./styles.css";
 
 const themeKey = "atherloom-react:theme";
 
+function draftKey(conversationId: string | null, personaId: string | null) {
+  return `atherloom-react:draft:${personaId || "__default__"}:${conversationId || "__new__"}`;
+}
+
 export default function App() {
   const workspace = useWorkspace();
   const [query, setQuery] = useState("");
+  const [searchResultIds, setSearchResultIds] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -44,11 +49,36 @@ export default function App() {
     requestAnimationFrame(() => container.scrollTo({ top: container.scrollHeight, behavior: workspace.busy ? "auto" : "smooth" }));
   }, [workspace.messages, workspace.busy]);
 
+  useEffect(() => {
+    setDraft(localStorage.getItem(draftKey(workspace.currentId, workspace.personaId)) || "");
+  }, [workspace.currentId, workspace.personaId]);
+
+  useEffect(() => {
+    const normalized = query.trim();
+    if (!normalized) {
+      setSearchResultIds([]);
+      return;
+    }
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void workspace.searchConversations(normalized).then((items) => {
+        if (active) setSearchResultIds(items.map((item) => item.id));
+      }).catch(() => {
+        if (active) setSearchResultIds([]);
+      });
+    }, 250);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [query, workspace.personaId, workspace.searchConversations]);
+
   const conversations = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase("zh-CN");
     if (!normalized) return workspace.conversations;
-    return workspace.conversations.filter((conversation) => conversation.title.toLocaleLowerCase("zh-CN").includes(normalized));
-  }, [query, workspace.conversations]);
+    const remote = new Set(searchResultIds);
+    return workspace.conversations.filter((conversation) => remote.has(conversation.id) || conversation.title.toLocaleLowerCase("zh-CN").includes(normalized));
+  }, [query, searchResultIds, workspace.conversations]);
 
   const openConversation = async (id: string) => {
     await workspace.openConversation(id);
@@ -68,27 +98,45 @@ export default function App() {
   const send = async () => {
     const content = draft;
     if (!content.trim()) return;
+    const storageKey = draftKey(workspace.currentId, workspace.personaId);
+    localStorage.removeItem(storageKey);
     setDraft("");
     try {
       await workspace.send(content);
     } catch {
       setDraft(content);
+      localStorage.setItem(storageKey, content);
       setSettingsOpen(true);
     }
   };
 
-  const hasConversationContent = Boolean(workspace.currentId || workspace.messages.length);
+  const changeDraft = (value: string) => {
+    setDraft(value);
+    const storageKey = draftKey(workspace.currentId, workspace.personaId);
+    if (value) localStorage.setItem(storageKey, value); else localStorage.removeItem(storageKey);
+  };
+
+  const hasConversationContent = Boolean(workspace.messages.length);
 
   return (
     <div className={`app-shell${sidebarOpen ? " sidebar-open" : ""}`}>
       <Sidebar
         conversations={conversations}
+        personas={workspace.personas}
+        personaId={workspace.personaId}
         currentId={workspace.currentId}
         query={query}
         displayName={String(workspace.settings.display_name || "")}
         onQueryChange={setQuery}
+        onPersonaChange={(id) => {
+          void workspace.setPersonaId(id);
+          setQuery("");
+        }}
         onNewConversation={() => void newConversation()}
         onOpenConversation={(id) => void openConversation(id)}
+        onRenameConversation={workspace.renameConversation}
+        onUpdateConversationState={workspace.updateConversationState}
+        onDeleteConversation={workspace.deleteConversation}
         onOpenSettings={() => setSettingsOpen(true)}
         onClose={() => setSidebarOpen(false)}
       />
@@ -98,7 +146,6 @@ export default function App() {
         <header className="topbar">
           <button className="mobile-menu" type="button" aria-label="打开菜单" onClick={() => setSidebarOpen(true)}><MenuIcon /></button>
           <div className="conversation-title">{workspace.currentConversation?.title || "新对话"}</div>
-          <button className="icon-button" type="button" aria-label="打开设置" onClick={() => setSettingsOpen(true)}><SettingsIcon /></button>
         </header>
 
         <section
@@ -138,9 +185,9 @@ export default function App() {
           personas={workspace.personas}
           providerId={workspace.providerId}
           personaId={workspace.personaId}
-          onChange={setDraft}
+          onChange={changeDraft}
           onProviderChange={(id) => id ? workspace.setProviderId(id) : setSettingsOpen(true)}
-          onPersonaChange={workspace.setPersonaId}
+          onPersonaChange={(id) => void workspace.setPersonaId(id)}
           onSend={() => void send()}
           onStop={workspace.stop}
         />
@@ -172,6 +219,8 @@ export default function App() {
         onCreateWorldbook={workspace.createWorldbook}
         onUpdateWorldbook={workspace.updateWorldbook}
         onDeleteWorldbook={workspace.deleteWorldbook}
+        onExportBackup={workspace.exportBackup}
+        onRestoreBackup={workspace.restoreBackup}
       />
     </div>
   );

@@ -6,8 +6,11 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
+import android.util.Base64;
 import android.view.ViewGroup;
 import android.webkit.JavascriptInterface;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
@@ -29,8 +32,13 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class MainActivity extends Activity {
+    private static final int REQUEST_OPEN_FILE = 4101;
+    private static final int REQUEST_SAVE_FILE = 4102;
     private WebView webView;
     private NativeBridge nativeBridge;
+    private ValueCallback<Uri[]> fileChooserCallback;
+    private byte[] pendingSaveData;
+    private String pendingSaveCallbackId;
 
     @Override
     public void onCreate(Bundle state) {
@@ -53,6 +61,23 @@ public class MainActivity extends Activity {
         webView.getSettings().setDomStorageEnabled(true);
         nativeBridge = new NativeBridge(this, webView);
         webView.addJavascriptInterface(nativeBridge, "AtherloomNative");
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
+                if (fileChooserCallback != null) fileChooserCallback.onReceiveValue(null);
+                fileChooserCallback = callback;
+                Intent intent = params.createIntent();
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                try {
+                    startActivityForResult(intent, REQUEST_OPEN_FILE);
+                    return true;
+                } catch (Exception error) {
+                    fileChooserCallback = null;
+                    callback.onReceiveValue(null);
+                    return false;
+                }
+            }
+        });
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
@@ -69,16 +94,76 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void requestFileSave(String fileName, String mimeType, String base64, String callbackId) {
+        runOnUiThread(() -> {
+            try {
+                if (pendingSaveCallbackId != null) emitFileResult(pendingSaveCallbackId, false, "上一个文件还没有保存完成");
+                pendingSaveData = Base64.decode(base64, Base64.DEFAULT);
+                pendingSaveCallbackId = callbackId;
+                Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType(mimeType == null || mimeType.isEmpty() ? "application/octet-stream" : mimeType);
+                intent.putExtra(Intent.EXTRA_TITLE, fileName);
+                startActivityForResult(intent, REQUEST_SAVE_FILE);
+            } catch (Exception error) {
+                pendingSaveData = null;
+                pendingSaveCallbackId = null;
+                emitFileResult(callbackId, false, error.getMessage());
+            }
+        });
+    }
+
+    private void emitFileResult(String callbackId, boolean ok, String message) {
+        if (callbackId == null || callbackId.isEmpty() || webView == null) return;
+        try {
+            String result = new JSONObject().put("ok", ok).put(ok ? "message" : "error", message == null ? "" : message).toString();
+            String script = "window.AtherloomNativeFile&&window.AtherloomNativeFile("
+                + JSONObject.quote(callbackId) + "," + JSONObject.quote(result) + ")";
+            webView.post(() -> webView.evaluateJavascript(script, null));
+        } catch (Exception ignored) {
+            // JSONObject with string fields should not fail; there is no safer callback channel here.
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_OPEN_FILE) {
+            ValueCallback<Uri[]> callback = fileChooserCallback;
+            fileChooserCallback = null;
+            if (callback != null) callback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data));
+            return;
+        }
+        if (requestCode != REQUEST_SAVE_FILE) return;
+        String callbackId = pendingSaveCallbackId;
+        byte[] content = pendingSaveData;
+        pendingSaveCallbackId = null;
+        pendingSaveData = null;
+        if (resultCode != RESULT_OK || data == null || data.getData() == null || content == null) {
+            emitFileResult(callbackId, false, "已取消保存");
+            return;
+        }
+        try (OutputStream output = getContentResolver().openOutputStream(data.getData())) {
+            if (output == null) throw new Exception("系统没有提供可写入的文件位置");
+            output.write(content);
+            emitFileResult(callbackId, true, "文件已保存");
+        } catch (Exception error) {
+            emitFileResult(callbackId, false, error.getMessage());
+        }
+    }
+
     static class NativeBridge {
         private static final String PREFS = "atherloom_react_runtime";
         private static final String BACKEND_URL = "backend_url";
         private final SharedPreferences preferences;
+        private final MainActivity activity;
         private final WebView webView;
         private final ConcurrentHashMap<String, HttpURLConnection> streams = new ConcurrentHashMap<>();
         private final Set<String> cancelledStreams = ConcurrentHashMap.newKeySet();
 
-        NativeBridge(Context context, WebView webView) {
-            this.preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        NativeBridge(MainActivity activity, WebView webView) {
+            this.activity = activity;
+            this.preferences = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
             this.webView = webView;
         }
 
@@ -116,6 +201,21 @@ public class MainActivity extends Activity {
             } finally {
                 if (connection != null) connection.disconnect();
             }
+        }
+
+        @JavascriptInterface
+        public void apiRequestAsync(String method, String path, String body, String callbackId) {
+            new Thread(() -> {
+                String result = apiRequest(method, path, body);
+                String script = "window.AtherloomNativeRequest&&window.AtherloomNativeRequest("
+                    + JSONObject.quote(callbackId) + "," + JSONObject.quote(result) + ")";
+                webView.post(() -> webView.evaluateJavascript(script, null));
+            }, "atherloom-api-request").start();
+        }
+
+        @JavascriptInterface
+        public void saveFile(String fileName, String mimeType, String base64, String callbackId) {
+            activity.requestFileSave(fileName, mimeType, base64, callbackId);
         }
 
         @JavascriptInterface
@@ -260,6 +360,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         if (nativeBridge != null) nativeBridge.streams.values().forEach(HttpURLConnection::disconnect);
+        if (fileChooserCallback != null) fileChooserCallback.onReceiveValue(null);
+        fileChooserCallback = null;
+        pendingSaveData = null;
+        pendingSaveCallbackId = null;
         if (webView != null) webView.destroy();
         super.onDestroy();
     }

@@ -311,6 +311,13 @@ body { font-size: 14px; font-weight: 400; -webkit-text-size-adjust: 100%; }
 .settings-nav button:hover, .settings-nav button.active { background: var(--surface-2); }
 .settings-nav button.active { font-weight: 650; }
 .settings-content { padding: 34px; }
+.runtime-mode-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 22px; padding: 13px 15px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.runtime-mode-banner.local { border-color: color-mix(in srgb, var(--accent) 42%, var(--border)); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+.runtime-mode-banner div { min-width: 0; }
+.runtime-mode-banner strong, .runtime-mode-banner small { display: block; }
+.runtime-mode-banner strong { margin-bottom: 3px; font-size: 13px; }
+.runtime-mode-banner small { color: var(--muted); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.runtime-mode-banner button { flex: 0 0 auto; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--surface); font-size: 12px; }
 .settings-section { width: 100%; max-width: 720px; }
 .section-heading { margin-bottom: 24px; }
 .section-heading h3 { margin: 0 0 5px; font: 400 26px/1.28 var(--serif); letter-spacing: 0; }
@@ -464,6 +471,7 @@ body { font-size: 14px; font-weight: 400; -webkit-text-size-adjust: 100%; }
   .settings-nav { gap: 4px; padding: 8px; overflow-x: auto; scrollbar-width: none; }
   .settings-nav::-webkit-scrollbar { display: none; }
   .settings-content { padding: 24px 18px 48px; }
+  .runtime-mode-banner { align-items: flex-start; }
   .settings-form.settings-edit-card { grid-template-columns: minmax(0, 1fr); }
   .settings-form.settings-edit-card > * { grid-column: 1; }
   .section-heading-with-action { align-items: flex-start; }

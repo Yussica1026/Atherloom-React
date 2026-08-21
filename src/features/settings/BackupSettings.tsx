@@ -91,11 +91,11 @@ export function BackupSettings({ onExport, onRestore }: BackupSettingsProps) {
     setStatus("正在校验备份文件…");
     try {
       const parsed = JSON.parse(await file.text()) as unknown;
-      if (!isBackupBundle(parsed)) throw new Error("不是有效的 Atherloom 服务端备份文件；旧版仅 localStorage 的 v1 备份不能覆盖当前 SQLite 数据");
+      if (!isBackupBundle(parsed)) throw new Error("不是有效的 Atherloom v2 备份文件；旧版 v1 备份不能直接覆盖当前数据");
       const restoreParts = selected.filter((part) => parsed.parts.includes(part));
       if (!restoreParts.length) throw new Error("当前勾选的数据不在这个备份文件中");
       const labels = choices.filter((item) => restoreParts.includes(item.value)).map((item) => item.label).join("、");
-      if (!window.confirm(`将用备份替换当前的“${labels}”。恢复前会自动创建数据库快照，确定继续吗？`)) {
+      if (!window.confirm(`将用备份替换当前的“${labels}”。恢复前会自动创建当前数据快照，确定继续吗？`)) {
         setStatus("已取消恢复，没有修改数据");
         return;
       }
@@ -113,7 +113,7 @@ export function BackupSettings({ onExport, onRestore }: BackupSettingsProps) {
 
   return (
     <section className="settings-section settings-feature">
-      <div className="section-heading"><h3>备份与恢复</h3><p>备份数据来自当前 FastAPI 的 SQLite；APK 使用 Android 系统文件保存与选择器。</p></div>
+      <div className="section-heading"><h3>备份与恢复</h3><p>服务器模式备份 FastAPI SQLite；本机模式备份当前设备数据。APK 使用 Android 系统文件保存与选择器。</p></div>
       <div className="backup-choices">
         {choices.map((item) => (
           <label className="backup-choice" key={item.value}>
@@ -127,7 +127,7 @@ export function BackupSettings({ onExport, onRestore }: BackupSettingsProps) {
         <button className="primary-button" type="button" disabled={busy || !selected.length} onClick={() => void exportBackup()}>导出备份</button>
       </div>
       <div className="settings-edit-card backup-action-card">
-        <div><strong>从备份选择性恢复</strong><p>只替换上方勾选且文件中存在的分类；服务端会先保留完整数据库快照。</p></div>
+        <div><strong>从备份选择性恢复</strong><p>只替换上方勾选且文件中存在的分类；恢复前会先保留当前数据快照。</p></div>
         <button className="secondary-button" type="button" disabled={busy || !selected.length} onClick={() => fileRef.current?.click()}>选择文件</button>
         <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={(event) => void restoreBackup(event)} />
       </div>

@@ -135,13 +135,20 @@ export function SettingsPanel({
             {tabs.map((item) => <button type="button" className={tab === item.value ? "active" : ""} onClick={() => setTab(item.value)} key={item.value}>{item.label}</button>)}
           </nav>
           <div className="settings-content">
+            <div className={`runtime-mode-banner${apiBase ? " connected" : " local"}`}>
+              <div>
+                <strong>{apiBase ? "FastAPI 连接模式" : "Android 本机模式"}</strong>
+                <small>{apiBase ? `数据保存到 ${apiBase}` : "设置、人格、世界书和聊天保存在本机；API Key 使用 Android 加密存储。"}</small>
+              </div>
+              <button type="button" onClick={() => setTab("connection")}>{apiBase ? "更改连接" : "连接服务器"}</button>
+            </div>
             {tab === "connection" ? <section className="settings-section settings-feature">
-              <div className="section-heading"><h3>后端连接</h3><p>Android 版填写运行 Atherloom FastAPI 的电脑或服务器地址；网页同域部署可以留空。</p></div>
+              <div className="section-heading"><h3>后端连接</h3><p>Android 留空即使用本机模式；需要连接电脑或服务器时再填写 FastAPI 地址。</p></div>
               <form className="settings-form one-column settings-edit-card" onSubmit={submitConnection}>
                 <label>FastAPI 根地址<input name="api_base" inputMode="url" value={apiBaseDraft} onChange={(event) => setApiBaseDraft(event.target.value)} placeholder="http://192.168.1.20:8876" /></label>
-                <p className="form-hint">手机与电脑需要能够互相访问。公网使用请配置 HTTPS；HTTP 只建议用于可信的同一局域网。</p>
+                <p className="form-hint">清空后保存会切回 Android 本机模式。连接服务器时，手机与电脑需要能够互相访问；公网应使用 HTTPS。</p>
                 <p className="form-status" aria-live="polite">{connectionStatus}</p>
-                <div className="form-actions"><button className="primary-button">保存并重新连接</button></div>
+                <div className="form-actions"><button className="primary-button">{apiBaseDraft.trim() ? "保存并重新连接" : "启用本机模式"}</button></div>
               </form>
             </section> : null}
 

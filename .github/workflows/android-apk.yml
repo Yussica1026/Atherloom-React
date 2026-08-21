@@ -92,4 +92,4 @@ jobs:
             android/apk-signature.txt \
             android/apk-badging.txt \
             --title "Atherloom React $GITHUB_REF_NAME" \
-            --notes "Atherloom React Android 固定签名版。独立包名 app.atherloom.react，不会覆盖旧版 Atherloom。若安装过 v0.1.0 Debug 测试版，需要先卸载测试版；已安装 v0.1.1-react 固定签名版的设备可直接覆盖升级并保留应用数据。首次打开后请在设置中填写可访问的 FastAPI 后端地址。"
+            --notes "Atherloom React Android 固定签名版。独立包名 app.atherloom.react，不会覆盖旧版 Atherloom。已安装固定签名版的设备可直接覆盖升级并保留应用数据。默认使用 Android 本机模式：API Key 加密保存，设置与聊天保存在本机；如需共用服务器数据，可在设置中填写 FastAPI 后端地址。"

@@ -30,7 +30,9 @@
 - 真实 Playwright 桌面与 390×844 手机回归：通过；覆盖线路创建/拉模型/测试/保存、人格与主动提问、用户名、欲望状态、流式切换、思考展开、消息版本/分支、日记生成与审计、侧栏布局和取消导出提示，控制台与页面错误为 0。
 - Android Standalone 回归：通过；系统剪贴板、加密线路、模型拉取/测试、Key 留空复用、备份脱敏、本机持久化与原生模型请求均无 FastAPI 网络回退。
 - Android FastAPI 原生桥回归：通过；异步保存、人格隔离、会话状态、搜索/删除、备份导出与选择性恢复均未回退到浏览器网络。
-- 版本已升为 `0.2.1-react-release` / versionCode `7`；固定签名 APK 与免登录下载链接等待 GitHub Actions 发布后再补记，不提前写成完成。
+- 版本为 `0.2.1-react-release` / versionCode `7`；GitHub Actions `32460238293` 已完成 React、Gradle、包名和固定签名全流程检查并成功发布。
+- `v0.2.1` Release 已公开：APK 3,046,884 字节，包名 `app.atherloom.react`；固定证书 SHA-256 指纹仍为 `c31ec8be3956258e35b852545d43607ea87cbeefa805593633fa0e522033940a`。
+- APK SHA-256 为 `fcbeeea4a48ea98ad0031dfb8f1b12bd846fa17358ed235ff64190191903a459`；免登录直链实测 HTTP 200 且返回字节数一致：<https://github.com/Yussica1026/Atherloom-React/releases/download/v0.2.1/Atherloom-React-Android-release.apk>。
 
 ## 2026-08-21 · v0.2.0 旧版功能迁移与稳定性复核
 

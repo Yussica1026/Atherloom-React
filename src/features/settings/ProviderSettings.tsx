@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent } from "react";
+import { readClipboardText } from "../../adapters/native/clipboard";
 import type { Provider, ProviderDraft, ProviderProbeDraft } from "../../domain/types";
 
 interface ProviderSettingsProps {
@@ -294,10 +295,10 @@ export function ProviderSettings({
               />
               <button type="button" onClick={async () => {
                 try {
-                  const value = await navigator.clipboard.readText();
+                  const value = await readClipboardText();
                   if (!value.trim()) throw new Error("剪贴板为空");
                   updateDraft("api_key", value.trim());
-                  setStatus("已从剪贴板粘贴");
+                  setStatus(`已从 Android 剪贴板粘贴 ${value.trim().length} 个字符`);
                 } catch (error) {
                   setStatus(`无法读取剪贴板：${error instanceof Error ? error.message : "系统未授权"}`);
                 }

@@ -16,6 +16,13 @@ import type {
   Worldbook,
   WorldbookDraft,
 } from "../../domain/types";
+import {
+  beginStandaloneChat,
+  completeStandaloneChat,
+  isStandaloneAndroid,
+  requestStandaloneJson,
+  type StandaloneChatResult,
+} from "../standalone/store";
 
 const apiBaseKey = "atherloom-react:api-base";
 
@@ -116,13 +123,17 @@ function requestNativeJson<T>(method: string, path: string, body: string): Promi
     }
   }
   const callbackId = `request-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return requestNativeCallback<T>(callbackId, () => bridge.apiRequestAsync?.(method, path, body, callbackId));
+}
+
+function requestNativeCallback<T>(callbackId: string, start: () => void): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     nativeRequests.set(callbackId, {
       resolve: (value) => resolve(value as T),
       reject,
     });
     try {
-      bridge.apiRequestAsync?.(method, path, body, callbackId);
+      start();
     } catch (error) {
       nativeRequests.delete(callbackId);
       reject(error instanceof Error ? error : new Error("无法启动 Android 请求"));
@@ -130,7 +141,17 @@ function requestNativeJson<T>(method: string, path: string, body: string): Promi
   });
 }
 
+function requestNativeProvider<T>(operation: string, payload: unknown) {
+  const bridge = window.AtherloomNative;
+  if (!bridge?.providerOperationAsync) {
+    return Promise.reject(new Error("当前 APK 不支持本机模型请求，请安装最新版本"));
+  }
+  const callbackId = `provider-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return requestNativeCallback<T>(callbackId, () => bridge.providerOperationAsync?.(operation, JSON.stringify(payload), callbackId));
+}
+
 export async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+  if (isStandaloneAndroid()) return requestStandaloneJson<T>(path, init, requestNativeProvider);
   if (window.AtherloomNative) {
     const method = String(init.method || "GET").toUpperCase();
     const body = typeof init.body === "string" ? init.body : "";
@@ -272,6 +293,23 @@ export async function streamChat(
   signal: AbortSignal,
   onEvent: (event: ChatStreamEvent) => void,
 ) {
+  if (isStandaloneAndroid()) {
+    const context = beginStandaloneChat(request);
+    onEvent({ user_id: context.userMessage.id });
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    const result = await requestNativeProvider<StandaloneChatResult>("chat", context.operation);
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    const saved = completeStandaloneChat(context, result);
+    onEvent({
+      assistant_id: saved.assistantMessage.id,
+      delta: saved.assistantMessage.content,
+      reasoning_delta: saved.assistantMessage.reasoning,
+      usage: saved.assistantMessage.usage,
+      title: saved.title,
+      done: true,
+    });
+    return;
+  }
   if (window.AtherloomNative) return streamChatNative(request, signal, onEvent);
   const response = await fetch(endpoint("/api/chat"), {
     method: "POST",

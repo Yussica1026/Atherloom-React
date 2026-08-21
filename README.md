@@ -23,7 +23,8 @@ Atherloom React 是现有 Atherloom 前端的组件化重建。它保留原来�
 - 跟随系统、浅色、深色、水色、薄荷绿、丁香、腮红主题模式。
 - 恢复旧版 Atherloom 交织 A 图标与首次进入/刷新/减弱动效三套开屏时序。
 - 人格工作区聊天隔离：专属线路、继续/新建启动策略、每会话草稿、切换保护、重命名、置顶、星标、归档、消息搜索与会话删除。
-- 五类脱敏完整备份、选择性恢复、恢复前 SQLite 快照，以及 Android 系统文件保存/选择器。
+- 五类脱敏完整备份、选择性恢复、恢复前快照，以及 Android 系统文件保存/选择器。
+- Android 无需电脑后端即可使用本机模式：API Key 进入系统加密存储，设置、人格、世界书、会话和消息保存在本机，模型请求由原生网络桥直连；也可主动切换到 FastAPI 服务器模式。
 
 其余模块的完整范围与当前状态见 [React 迁移总表](docs/MIGRATION_INVENTORY.md)；旧版逐项核对见 [功能对照审计](docs/LEGACY_PARITY_AUDIT.md)。未列为已完成的功能仍使用旧 Atherloom，不以空壳或假数据冒充迁移完成。
 
@@ -48,9 +49,9 @@ npm run dev
 
 ## Android 测试版
 
-Android 客户端使用独立包名 `app.atherloom.react`，不会覆盖旧版 Atherloom。APK 内置 React 页面，通过原生网络桥连接现有 FastAPI 后端，不把 API Key、数据库或聊天记录打进安装包。
+Android 客户端使用独立包名 `app.atherloom.react`，不会覆盖旧版 Atherloom。APK 内置 React 页面，默认使用本机模式：API Key 通过 Android 加密存储保管，设置和聊天数据留在当前设备，模型请求通过原生桥直接发往所填线路。
 
-首次打开 APK 后，进入“设置 → 后端连接”，填写电脑或服务器地址，例如 `http://192.168.1.20:8876`。局域网使用时 FastAPI 需要监听 `0.0.0.0`，手机与电脑处于可互访网络；公网使用应配置 HTTPS。详细说明见 [Android 构建说明](android/README.md)。
+需要共用现有 FastAPI/SQLite 时，可进入“设置 → 后端连接”填写电脑或服务器地址，例如 `http://192.168.1.20:8876`；清空地址并保存即可切回本机模式。详细说明见 [Android 构建说明](android/README.md)。
 
 Android 长期版使用现有 Atherloom 固定发布证书，签名材料只保存在私有 GitHub Actions Secrets 中。工作流在发布前核验证书指纹；从首个固定签名版起，后续同包名 APK 可以覆盖升级。安装过早期 Debug 测试版时，需要先卸载测试版再安装固定签名版。
 

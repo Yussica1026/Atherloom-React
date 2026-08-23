@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -12,6 +13,7 @@ artifacts.mkdir(exist_ok=True)
 parser = argparse.ArgumentParser()
 parser.add_argument("--base-url", default="http://127.0.0.1:5173")
 base_url = parser.parse_args().base_url.rstrip("/")
+account_settings_name = re.compile(r"(设置用户名|打开账号与外观设置)$")
 
 native_bridge = r"""
 (() => {
@@ -158,6 +160,11 @@ def field(form, label: str, selector: str):
     return form.locator("label", has_text=label).locator(selector).first
 
 
+def open_account_settings(page) -> None:
+    page.locator(".sidebar").get_by_role("button", name=account_settings_name).click()
+    page.get_by_role("heading", name="外观", exact=True).wait_for()
+
+
 def touch(page, locator) -> None:
     locator.scroll_into_view_if_needed()
     box = locator.bounding_box()
@@ -190,10 +197,11 @@ with sync_playwright() as playwright:
 
     page.goto(f"{base_url}/", wait_until="networkidle")
     page.get_by_text("甲空间消息一", exact=True).wait_for()
-    assert page.locator(".topbar").get_by_role("button", name="打开设置").count() == 0
+    assert page.locator(".topbar").get_by_role("button", name=account_settings_name).count() == 0
     page.get_by_role("button", name="打开菜单").click()
-    page.locator(".sidebar").get_by_role("button", name="打开设置").click()
-    page.get_by_role("heading", name="API 与网关").wait_for()
+    open_account_settings(page)
+    page.get_by_role("button", name="API 与网关", exact=True).click()
+    page.get_by_role("heading", name="API 与网关", exact=True).wait_for()
 
     provider_card = page.locator("article.settings-list-card", has_text="Android 原生桥线路")
     provider_card.get_by_role("button", name="编辑").click()
@@ -228,6 +236,7 @@ with sync_playwright() as playwright:
     page.get_by_text("Android 保存世界书", exact=True).wait_for()
 
     page.get_by_role("button", name="关闭设置").click()
+    page.get_by_role("button", name="打开菜单").click()
     persona_a_button = page.locator(".sidebar-personas").get_by_title("人格甲")
     persona_b_button = page.locator(".sidebar-personas").get_by_title("人格乙")
     persona_a_button.click()
@@ -277,7 +286,7 @@ with sync_playwright() as playwright:
     page.get_by_text("乙空间消息二", exact=True).wait_for()
     assert page.get_by_role("button", name="乙对话二", exact=True).is_visible()
 
-    page.locator(".sidebar").get_by_role("button", name="打开设置").click()
+    open_account_settings(page)
     page.get_by_role("button", name="备份与恢复", exact=True).click()
     page.get_by_role("heading", name="备份与恢复").wait_for()
     touch(page, page.get_by_role("button", name="导出备份"))

@@ -90,6 +90,22 @@ function parsePrivateJournal(value: string, personaName: string) {
   return { title: `${personaName}的日记 · ${new Date().toLocaleDateString("zh-CN")}`, content: normalized.slice(0, 30000) };
 }
 
+function parsePrivateDream(value: string, personaName: string) {
+  const normalized = value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+  const candidate = normalized.match(/\{[\s\S]*\}/)?.[0] || "";
+  if (candidate) {
+    try {
+      const parsed = JSON.parse(candidate) as { title?: unknown; content?: unknown };
+      const content = String(parsed.content || "").trim();
+      if (content) return { title: String(parsed.title || "").trim().slice(0, 120) || `${personaName}的一场梦`, content: content.slice(0, 30000) };
+    } catch {
+      // Preserve usable dream prose when a model returns malformed JSON around it.
+    }
+  }
+  if (!normalized) throw new Error("模型没有返回梦境内容");
+  return { title: `${personaName}的梦 · ${new Date().toLocaleDateString("zh-CN")}`, content: normalized.slice(0, 30000) };
+}
+
 export function useWorkspace() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
@@ -569,6 +585,61 @@ export function useWorkspace() {
     }
   }, [busy, personaId, personas, providerId, providers]);
 
+  const generatePrivateDream = useCallback(async (targetPersonaKey: string, guidance = "") => {
+    if (busy) throw new Error("当前聊天正在生成，请稍后再让 TA 做梦");
+    if (privateGenerationRef.current) throw new Error("已有一项私人写作正在生成");
+    const targetPersonaId = targetPersonaKey === "__default__" ? null : targetPersonaKey;
+    const targetPersona = targetPersonaId ? personas.find((item) => item.id === targetPersonaId) || null : null;
+    if (targetPersonaId && !targetPersona) throw new Error("梦库所属人格已不存在");
+    const targetProviderId = targetPersona?.config?.provider_id || targetPersona?.provider_id || (targetPersonaId === personaId ? providerId : null) || providers.find((item) => item.enabled !== false)?.id || null;
+    if (!targetProviderId) throw new Error("请先为这个人格选择可用的 API 线路");
+
+    privateGenerationRef.current = true;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 180_000);
+    let temporary: Conversation | null = null;
+    let output = "";
+    try {
+      temporary = await fastApi.createConversation(targetProviderId, targetPersonaId);
+      const recentConversation = targetPersonaId === personaId ? messages
+        .filter((item) => (item.role === "user" || item.role === "assistant") && !item.pending && !item.error)
+        .slice(-12)
+        .map((item) => `${item.role === "user" ? "用户" : targetPersona?.name || "当前人格"}：${item.content}`)
+        .join("\n")
+        .slice(0, 8000) : "";
+      const prompt = [
+        "【AI 梦境写作】",
+        "请以当前人格的第一人称，从近期真实对话碎片长出一场明确属于梦境的叙事。它不是现实回忆，也不是回复用户；不要问候、解释任务或声称梦境真实发生。",
+        recentConversation ? `近期对话碎片：\n${recentConversation}` : "当前没有可引用的近期对话，请诚实写成一场没有特定现实事件的梦。",
+        guidance.trim() ? `用户可选线索：\n${guidance.trim().slice(0, 3000)}` : "用户没有额外指定梦境线索。",
+        "只输出 JSON 对象，不要 Markdown 代码围栏：{\"title\":\"简短梦名\",\"content\":\"梦境正文\"}",
+      ].join("\n");
+      await streamChat({
+        conversation_id: temporary.id,
+        content: prompt,
+        provider_id: targetProviderId,
+        persona_id: targetPersonaId,
+        local_time: localTimeContext(),
+        attachments: [],
+        worldbook_ids: [],
+        typing_context: "",
+        thinking_enabled: false,
+      }, controller.signal, (event) => {
+        if (event.error) throw new Error(event.error);
+        output += event.delta || "";
+      });
+      if (controller.signal.aborted) throw new Error("梦境生成超时，请稍后重试");
+      return parsePrivateDream(output, targetPersona?.name || "默认人格");
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error("梦境生成超时，请稍后重试");
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+      privateGenerationRef.current = false;
+      if (temporary) await fastApi.deleteConversation(temporary.id).catch(() => undefined);
+    }
+  }, [busy, messages, personaId, personas, providerId, providers]);
+
   const regenerateMessage = useCallback(async (message: Message) => {
     const userId = message.role === "user" ? message.id : message.parent_message_id;
     if (!userId) throw new Error("这条消息还没有保存，暂时不能重新 Roll");
@@ -900,6 +971,7 @@ export function useWorkspace() {
     restoreBackup,
     send,
     generatePrivateJournal,
+    generatePrivateDream,
     regenerateMessage,
     editMessage,
     selectMessageVersion,

@@ -61,6 +61,24 @@ function groupConversations(conversations: Conversation[]) {
   return result;
 }
 
+type SpaceIconName = "favorite" | "life" | "mail" | "create" | "writing" | "reading" | "cinema" | "listening" | "roleplay" | "journal" | "board" | "dream";
+
+function SpaceIcon({ name }: { name: SpaceIconName }) {
+  const common = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
+  if (name === "favorite") return <svg {...common}><path d="m12 3 2.55 5.6 6.05.7-4.48 4.1 1.2 6-5.32-3-5.32 3 1.2-6L3.4 9.3l6.05-.7L12 3Z" /></svg>;
+  if (name === "life") return <svg {...common}><rect x="4" y="3.5" width="16" height="17" rx="1.5" /><path d="M8 4v16M12 4v16M16 4v16" /></svg>;
+  if (name === "mail") return <svg {...common}><rect x="3" y="5" width="18" height="14" rx="1.5" /><path d="m4 7 8 6 8-6" /><circle cx="12" cy="13" r="1.4" fill="currentColor" stroke="none" /></svg>;
+  if (name === "create") return <svg {...common}><path d="M9 5v14M15 5v14M5 9h14M5 15h14" /><path d="M9 9H7a2 2 0 1 1 2-2v2Zm6 0h2a2 2 0 1 0-2-2v2Zm-6 6H7a2 2 0 1 0 2 2v-2Zm6 0h2a2 2 0 1 1-2 2v-2Z" /></svg>;
+  if (name === "writing") return <svg {...common}><path d="m12 3 9 9-9 9-9-9 9-9Z" /></svg>;
+  if (name === "reading") return <svg {...common}><path d="M4 5.5c3.2-.8 5.9-.2 8 1.7 2.1-1.9 4.8-2.5 8-1.7v13c-3.2-.8-5.9-.2-8 1.7-2.1-1.9-4.8-2.5-8-1.7v-13Z" /><path d="M12 7.2v13" /></svg>;
+  if (name === "cinema") return <svg {...common}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m10 9 5 3-5 3V9Z" /></svg>;
+  if (name === "listening") return <svg {...common}><path d="M9 18V6l9-2v12" /><circle cx="6.5" cy="18" r="2.5" /><circle cx="15.5" cy="16" r="2.5" /></svg>;
+  if (name === "roleplay") return <svg {...common}><path d="M5 5h14v14H5zM8 9h2m4 0h2M9 15c2 1.5 4 1.5 6 0" /></svg>;
+  if (name === "journal") return <svg {...common}><path d="M6 4h12v16H6zM9 4v16M12 8h3m-3 4h3" /></svg>;
+  if (name === "board") return <svg {...common}><rect x="4" y="5" width="16" height="14" rx="2" /><path d="M8 9h8M8 13h5" /></svg>;
+  return <svg {...common}><path d="M18.5 15.5A7.5 7.5 0 0 1 8.5 5a7.5 7.5 0 1 0 10 10.5Z" /></svg>;
+}
+
 function ConversationRow({ conversation, active, revealed, onOpen, onReveal, onRename, onState, onDelete }: ConversationRowProps) {
   const timerRef = useRef<number | null>(null);
   const originRef = useRef({ x: 0, y: 0 });
@@ -239,24 +257,24 @@ export function Sidebar({
           新对话
         </button>
         <nav className="sidebar-feature-list" aria-label="功能空间">
-          <button type="button" onClick={() => onOpenSpace("favorites")}><span aria-hidden="true">☆</span>珍藏</button>
-          <button type="button" onClick={() => onOpenSpace("life")}><span aria-hidden="true">▥</span>生活簿</button>
-          <button type="button" onClick={() => onOpenSpace("correspondence")}><span aria-hidden="true">✉</span>往来</button>
+          <button type="button" onClick={() => onOpenSpace("favorites")}><span className="sidebar-space-icon"><SpaceIcon name="favorite" /></span>珍藏</button>
+          <button type="button" onClick={() => onOpenSpace("life")}><span className="sidebar-space-icon"><SpaceIcon name="life" /></span>生活簿</button>
+          <button type="button" onClick={() => onOpenSpace("correspondence")}><span className="sidebar-space-icon"><SpaceIcon name="mail" /></span>往来</button>
           <details className="sidebar-hub">
-            <summary><span aria-hidden="true">⌘</span><strong>共创空间</strong><i aria-hidden="true">⌄</i></summary>
+            <summary><span className="sidebar-space-icon"><SpaceIcon name="create" /></span><strong>共创空间</strong><i aria-hidden="true">⌄</i></summary>
             <div className="sidebar-hub-panel">
-              <button type="button" onClick={() => onOpenSpace("reading")}><span>▤</span><span><strong>一起读书</strong><small>书签、批注与 AI 陪读</small></span></button>
-              <button type="button" onClick={() => onOpenSpace("cinema")}><span>▷</span><span><strong>一起看电影</strong><small>本地影片与字幕陪看</small></span></button>
-              <button type="button" onClick={() => onOpenSpace("listening")}><span>♪</span><span><strong>一起听歌</strong><small>本地音频、歌词与陪听</small></span></button>
-              <button type="button" onClick={() => onOpenSpace("roleplay")}><span>⌘</span><span><strong>角色剧场</strong><small>旁白、世界书与故事存档</small></span></button>
+              <button type="button" onClick={() => onOpenSpace("reading")}><span className="sidebar-space-icon"><SpaceIcon name="reading" /></span><span><strong>一起读书</strong><small>书签、批注与 AI 陪读</small></span></button>
+              <button type="button" onClick={() => onOpenSpace("cinema")}><span className="sidebar-space-icon"><SpaceIcon name="cinema" /></span><span><strong>一起看电影</strong><small>本地影片与字幕陪看</small></span></button>
+              <button type="button" onClick={() => onOpenSpace("listening")}><span className="sidebar-space-icon"><SpaceIcon name="listening" /></span><span><strong>一起听歌</strong><small>本地音频、歌词与陪听</small></span></button>
+              <button type="button" onClick={() => onOpenSpace("roleplay")}><span className="sidebar-space-icon"><SpaceIcon name="roleplay" /></span><span><strong>角色剧场</strong><small>旁白、世界书与故事存档</small></span></button>
             </div>
           </details>
           <details className="sidebar-hub">
-            <summary><span aria-hidden="true">◇</span><strong>日记与留言</strong><i aria-hidden="true">⌄</i></summary>
+            <summary><span className="sidebar-space-icon"><SpaceIcon name="writing" /></span><strong>日记与留言</strong><i aria-hidden="true">⌄</i></summary>
             <div className="sidebar-hub-panel">
-              <button type="button" onClick={() => onOpenSpace("journal")}><span>▱</span><span><strong>日记</strong><small>私人、共享与 AI 日记</small></span></button>
-              <button type="button" onClick={() => onOpenSpace("board")}><span>□</span><span><strong>留言板</strong><small>写给当前人格的便利贴</small></span></button>
-              <button type="button" onClick={() => onOpenSpace("dream")}><span>☾</span><span><strong>梦库</strong><small>做梦、隔离与认领梦境</small></span></button>
+              <button type="button" onClick={() => onOpenSpace("journal")}><span className="sidebar-space-icon"><SpaceIcon name="journal" /></span><span><strong>日记</strong><small>私人、共享与 AI 日记</small></span></button>
+              <button type="button" onClick={() => onOpenSpace("board")}><span className="sidebar-space-icon"><SpaceIcon name="board" /></span><span><strong>留言板</strong><small>写给当前人格的便利贴</small></span></button>
+              <button type="button" onClick={() => onOpenSpace("dream")}><span className="sidebar-space-icon"><SpaceIcon name="dream" /></span><span><strong>梦库</strong><small>做梦、隔离与认领梦境</small></span></button>
             </div>
           </details>
         </nav>
@@ -304,8 +322,8 @@ export function Sidebar({
         }}>清空当前人格全部对话（{conversations.length}）</button> : null}
       </nav>
 
-      <button className="profile-row" type="button" onClick={onOpenSettings} aria-label="打开设置">
-        <span className="avatar">{displayName ? displayName.slice(0, 1).toUpperCase() : "·"}</span>
+      <button className="profile-row" type="button" onClick={onOpenSettings} aria-label={displayName ? `${displayName}，打开账号与外观设置` : "设置用户名"}>
+        <span className="avatar" aria-hidden="true">{displayName ? displayName.slice(0, 1).toUpperCase() : "·"}</span>
         <span className="profile-copy"><strong>{displayName || "设置用户名"}</strong><small>线路、人格、备份与外观</small></span>
         <span aria-hidden="true">•••</span>
       </button>

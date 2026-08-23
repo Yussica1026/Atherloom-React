@@ -165,6 +165,79 @@ class LegacyRegressionContracts(unittest.TestCase):
         self.assertIn('displayName ? displayName.slice(0, 1).toUpperCase() : "·"', sidebar)
         self.assertIn("settings: {}", source("src/adapters/standalone/store.ts"))
 
+    def test_mobile_account_opens_username_directly_and_closes_sidebar(self):
+        app = source("src/app/App.tsx")
+        panel = source("src/features/settings/SettingsPanel.tsx")
+        sidebar = source("src/features/shell/Sidebar.tsx")
+        self.assertIn('openSettings("appearance")', app)
+        self.assertIn("setSidebarOpen(false)", app[app.index("onOpenSettings="):app.index("onOpenSpace=")])
+        self.assertIn("initialTab", panel)
+        self.assertIn("scrollIntoView", panel)
+        self.assertIn('setAttribute("inert", "")', panel)
+        self.assertIn('event.key !== "Tab"', panel)
+        self.assertIn('appearance-name-editor input', panel)
+        self.assertIn("aria-current", panel)
+        self.assertIn("aria-pressed", panel)
+        self.assertIn('String(saved.display_name || "") !== nextName', panel)
+        self.assertIn('displayName ? `${displayName}，打开账号与外观设置` : "设置用户名"', sidebar)
+
+    def test_correspondence_and_writing_use_the_legacy_workspace_structure(self):
+        hub = source("src/features/spaces/FeatureHub.tsx")
+        self.assertIn('"mail" | "parlor" | "audit"', hub)
+        self.assertIn("AI CORRESPONDENCE", hub)
+        self.assertIn("用户完整知情", hub)
+        self.assertIn("PRIVATE PARLOR", hub)
+        self.assertIn('requestJson<{ code: string; expires_at: string }>("/api/correspondence/invites"', hub)
+        self.assertIn("writing-space-tabs", hub)
+        self.assertIn("日记与留言", hub)
+        self.assertIn("让 TA 做梦", hub)
+        self.assertNotIn("AI 会客厅已按你的要求暂缓", hub)
+        self.assertIn("RULE PREVIEW", hub)
+        self.assertIn("这不是运行中倒计时", hub)
+        self.assertIn("FastAPI 暂不读取", hub)
+        self.assertIn("prependDream(entry)", hub)
+        self.assertIn("dreams: [entry, ...current.dreams]", hub)
+        self.assertIn('setAttribute("inert", "")', hub)
+        self.assertIn('event.key !== "Tab"', hub)
+
+    def test_correspondence_uses_real_backend_semantics_without_fake_delivery(self):
+        hub = source("src/features/spaces/FeatureHub.tsx")
+        for route in (
+            "/api/correspondence/${encodeURIComponent(personaKey)}",
+            "/api/correspondence/contacts",
+            "/user-decision",
+            "/block",
+            "/api/correspondence/mail",
+        ):
+            self.assertIn(route, hub)
+        self.assertIn('entry.status === "delivered"', hub)
+        self.assertIn('entry.status === "blocked"', hub)
+        self.assertIn("Android 本机模式尚未接入真实往来服务", hub)
+        self.assertNotIn("这一封已保存并标记为已送达", hub)
+        self.assertNotIn("解除屏蔽", hub)
+
+    def test_new_workspace_colors_are_theme_derived_and_icons_are_svg(self):
+        styles = source("src/app/styles.css")
+        themed = styles[styles.index("/* Screenshot-led private workspaces."):]
+        self.assertNotRegex(themed, r"#[0-9a-fA-F]{3,8}")
+        for token in ("var(--bg)", "var(--surface)", "var(--accent)", "var(--border)", "var(--text)"):
+            self.assertIn(token, themed)
+        self.assertIn("--workspace-accent-ink", themed)
+        self.assertIn("--workspace-muted-ink", themed)
+        self.assertNotIn("!important", themed)
+        self.assertIn('contentRef.current?.scrollTo({ top: 0', source("src/features/spaces/FeatureHub.tsx"))
+        sidebar = source("src/features/shell/Sidebar.tsx")
+        self.assertIn("function SpaceIcon", sidebar)
+        self.assertIn('<SpaceIcon name="mail" />', sidebar)
+
+    def test_ai_dream_uses_a_hidden_temporary_conversation(self):
+        workspace = source("src/features/workspace/useWorkspace.ts")
+        block = workspace[workspace.index("const generatePrivateDream"):workspace.index("const regenerateMessage")]
+        self.assertIn("fastApi.createConversation(targetProviderId, targetPersonaId)", block)
+        self.assertIn("fastApi.deleteConversation(temporary.id)", block)
+        self.assertIn("近期对话碎片", block)
+        self.assertNotIn("setMessages", block)
+
 
 if __name__ == "__main__":
     unittest.main()

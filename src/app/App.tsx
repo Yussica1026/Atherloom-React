@@ -6,7 +6,7 @@ import { isThemeName, type Attachment, type Message, type MotivationPayload, typ
 import { Composer } from "../features/chat/Composer";
 import { MessageList } from "../features/chat/MessageList";
 import { VoiceCall } from "../features/chat/VoiceCall";
-import { SettingsPanel } from "../features/settings/SettingsPanel";
+import { SettingsPanel, type SettingsTab } from "../features/settings/SettingsPanel";
 import { Sidebar } from "../features/shell/Sidebar";
 import { FeatureHub, type FeatureSpace } from "../features/spaces/FeatureHub";
 import { useWorkspace } from "../features/workspace/useWorkspace";
@@ -63,6 +63,7 @@ export default function App() {
   const [selectedWorldbookIds, setSelectedWorldbookIds] = useState<string[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("providers");
   const [featureSpace, setFeatureSpace] = useState<FeatureSpace | null>(null);
   const [callOpen, setCallOpen] = useState(false);
   const [compressOpen, setCompressOpen] = useState(false);
@@ -82,6 +83,11 @@ export default function App() {
   const nearBottomRef = useRef(true);
   const typingStartedRef = useRef(0);
   const typingLastRef = useRef(0);
+
+  function openSettings(tab: SettingsTab = "providers") {
+    setSettingsTab(tab);
+    setSettingsOpen(true);
+  }
 
   useEffect(() => {
     localStorage.setItem(themeKey, theme);
@@ -196,7 +202,7 @@ export default function App() {
       setDraft("");
       setSidebarOpen(false);
     } catch {
-      setSettingsOpen(true);
+      openSettings("providers");
     }
   };
 
@@ -221,7 +227,7 @@ export default function App() {
       setDraft(content);
       setAttachments(pendingAttachments);
       localStorage.setItem(storageKey, content);
-      setSettingsOpen(true);
+      openSettings("providers");
     }
   };
 
@@ -360,7 +366,10 @@ export default function App() {
         onUpdateConversationState={workspace.updateConversationState}
         onDeleteConversation={workspace.deleteConversation}
         onClearPersonaConversations={workspace.clearPersonaConversations}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => {
+          setSidebarOpen(false);
+          openSettings("appearance");
+        }}
         onOpenSpace={(space) => {
           setFeatureSpace(space);
           setSidebarOpen(false);
@@ -399,7 +408,7 @@ export default function App() {
               <h1>本地后端还没有连接</h1>
               <p>{workspace.error}</p>
               <div className="connection-actions">
-                <button className="primary-button" onClick={() => setSettingsOpen(true)}>设置后端地址</button>
+                <button className="primary-button" onClick={() => openSettings("connection")}>设置后端地址</button>
                 <button className="secondary-button" onClick={() => void workspace.retry()}>重新连接</button>
               </div>
             </div>
@@ -439,7 +448,7 @@ export default function App() {
           providerId={workspace.providerId}
           personaId={workspace.personaId}
           onChange={changeDraft}
-          onProviderChange={(value) => value ? void workspace.selectProviderModel(value) : setSettingsOpen(true)}
+          onProviderChange={(value) => value ? void workspace.selectProviderModel(value) : openSettings("providers")}
           onPersonaChange={(id) => void workspace.setPersonaId(id)}
           onAddFiles={addFiles}
           onRemoveAttachment={(id) => setAttachments((current) => current.filter((item) => item.id !== id))}
@@ -464,6 +473,7 @@ export default function App() {
 
       <SettingsPanel
         open={settingsOpen}
+        initialTab={settingsTab}
         providers={workspace.providers}
         personas={workspace.personas}
         worldbooks={workspace.worldbooks}
@@ -502,10 +512,15 @@ export default function App() {
         open={featureSpace}
         personaId={workspace.personaId}
         personas={workspace.personas}
+        providers={workspace.providers}
         worldbooks={workspace.worldbooks}
         favorites={workspace.favorites}
         onClose={() => setFeatureSpace(null)}
         onChangeSpace={setFeatureSpace}
+        onOpenSettingsTab={(tab) => {
+          setFeatureSpace(null);
+          openSettings(tab);
+        }}
         onOpenFavorite={async (conversationId) => {
           await workspace.openConversation(conversationId);
           setFeatureSpace(null);
@@ -515,11 +530,12 @@ export default function App() {
           try {
             return await workspace.send(content, [], selectedWorldbookIds);
           } catch {
-            setSettingsOpen(true);
+            openSettings("providers");
             return "";
           }
         }}
         onGeneratePrivateJournal={workspace.generatePrivateJournal}
+        onGeneratePrivateDream={workspace.generatePrivateDream}
       />
       <VoiceCall
         open={callOpen}

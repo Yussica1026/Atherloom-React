@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type {
   AppSettings,
   BackupBundle,
@@ -28,6 +28,7 @@ import { RuntimeSettings } from "./RuntimeSettings";
 
 interface SettingsPanelProps {
   open: boolean;
+  initialTab?: SettingsTab;
   providers: Provider[];
   personas: Persona[];
   worldbooks: Worldbook[];
@@ -39,7 +40,7 @@ interface SettingsPanelProps {
   onClose: () => void;
   onThemeChange: (theme: ThemeName) => void;
   onApiBaseChange: (value: string) => void;
-  onSettingsChange: (patch: Partial<AppSettings>) => Promise<unknown>;
+  onSettingsChange: (patch: Partial<AppSettings>) => Promise<AppSettings>;
   onCreateProvider: (draft: ProviderDraft) => Promise<unknown>;
   onUpdateProvider: (id: string, draft: ProviderDraft) => Promise<unknown>;
   onDeleteProvider: (id: string) => Promise<void>;
@@ -60,7 +61,7 @@ interface SettingsPanelProps {
   onRefreshMcpServer: (id: string) => Promise<unknown>;
 }
 
-type SettingsTab = "connection" | "providers" | "personas" | "worldbooks" | "summary" | "memory" | "mcp" | "tools" | "runtime" | "backup" | "appearance";
+export type SettingsTab = "connection" | "providers" | "personas" | "worldbooks" | "summary" | "memory" | "mcp" | "tools" | "runtime" | "backup" | "appearance";
 
 const tabs: Array<{ value: SettingsTab; label: string }> = [
   { value: "connection", label: "后端连接" },
@@ -88,6 +89,7 @@ const themes: Array<{ value: ThemeName; label: string }> = [
 
 export function SettingsPanel({
   open,
+  initialTab = "providers",
   providers,
   personas,
   worldbooks,
@@ -119,28 +121,75 @@ export function SettingsPanel({
   onTestMcpServer,
   onRefreshMcpServer,
 }: SettingsPanelProps) {
-  const [tab, setTab] = useState<SettingsTab>("providers");
+  const [tab, setTab] = useState<SettingsTab>(initialTab);
   const [connectionStatus, setConnectionStatus] = useState("");
   const [apiBaseDraft, setApiBaseDraft] = useState(apiBase);
   const [displayNameDraft, setDisplayNameDraft] = useState(String(settings.display_name || ""));
   const [appearanceStatus, setAppearanceStatus] = useState("");
+  const navRef = useRef<HTMLElement>(null);
+  const layerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
 
   useEffect(() => {
     if (open) {
+      setTab(initialTab);
       setApiBaseDraft(apiBase);
       setDisplayNameDraft(String(settings.display_name || ""));
       setAppearanceStatus("");
     }
-  }, [apiBase, open, settings.display_name]);
+  }, [apiBase, initialTab, open]);
 
   useEffect(() => {
     if (!open) return;
-    const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const layer = layerRef.current;
+    const siblings = layer?.parentElement ? Array.from(layer.parentElement.children).filter((item) => item !== layer) as HTMLElement[] : [];
+    const inertState = siblings.map((item) => [item, item.hasAttribute("inert")] as const);
+    siblings.forEach((item) => item.setAttribute("inert", ""));
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(panelRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])') || []).filter((item) => !item.hasAttribute("hidden") && item.getClientRects().length > 0);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
-  }, [onClose, open]);
+    window.addEventListener("keydown", handleKey);
+    return () => {
+      window.removeEventListener("keydown", handleKey);
+      inertState.forEach(([item, wasInert]) => wasInert ? item.setAttribute("inert", "") : item.removeAttribute("inert"));
+      const fallback = previousFocus?.closest(".sidebar") && window.matchMedia("(max-width: 760px)").matches ? document.querySelector<HTMLElement>(".mobile-menu") : previousFocus;
+      fallback?.focus();
+    };
+  }, [initialTab, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const frame = window.requestAnimationFrame(() => navRef.current?.querySelector<HTMLElement>("button.active")?.scrollIntoView({ block: "nearest", inline: "center" }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, tab]);
+
+  useEffect(() => {
+    if (!open || tab !== initialTab) return;
+    const frame = window.requestAnimationFrame(() => {
+      const target = tab === "appearance" ? panelRef.current?.querySelector<HTMLInputElement>(".appearance-name-editor input") : navRef.current?.querySelector<HTMLElement>("button.active");
+      (target || panelRef.current?.querySelector<HTMLElement>("button"))?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [initialTab, open, tab]);
 
   if (!open) return null;
 
@@ -156,15 +205,15 @@ export function SettingsPanel({
   };
 
   return (
-    <div className="dialog-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="settings-panel" role="dialog" aria-modal="true" aria-label="设置">
+    <div ref={layerRef} className="dialog-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section ref={panelRef} className="settings-panel" role="dialog" aria-modal="true" aria-label="设置">
         <header className="settings-header">
           <div><span>LOCAL WORKSPACE</span><h2>设置</h2></div>
           <button type="button" onClick={onClose} aria-label="关闭设置"><CloseIcon /></button>
         </header>
         <div className="settings-layout">
-          <nav className="settings-nav" aria-label="设置分类">
-            {tabs.map((item) => <button type="button" className={tab === item.value ? "active" : ""} onClick={() => setTab(item.value)} key={item.value}>{item.label}</button>)}
+          <nav ref={navRef} className="settings-nav" aria-label="设置分类">
+            {tabs.map((item) => <button type="button" className={tab === item.value ? "active" : ""} aria-current={tab === item.value ? "page" : undefined} onClick={() => setTab(item.value)} key={item.value}>{item.label}</button>)}
           </nav>
           <div className="settings-content">
             <div className={`runtime-mode-banner${apiBase ? " connected" : " local"}`}>
@@ -226,9 +275,9 @@ export function SettingsPanel({
 
             {tab === "appearance" ? <section className="settings-section settings-feature">
               <div className="section-heading"><h3>外观</h3><p>跟随系统保留最初的暖米白与暖黑灰；水色、薄荷、丁香和腮红只是可选配色。</p></div>
-              <label className="theme-setting">主题<select value={theme} onChange={(event) => onThemeChange(event.target.value as ThemeName)}>{themes.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
-              <div className="theme-swatches">{themes.map((item) => <button type="button" key={item.value} className={`theme-swatch swatch-${item.value}${theme === item.value ? " active" : ""}`} onClick={() => onThemeChange(item.value)}><span /><strong>{item.label}</strong></button>)}</div>
-              <form className="appearance-name-editor" onSubmit={(event) => { event.preventDefault(); setAppearanceStatus("正在保存用户名…"); void onSettingsChange({ display_name: displayNameDraft.trim() }).then(() => setAppearanceStatus("用户名已保存")).catch((error) => setAppearanceStatus(error instanceof Error ? error.message : "用户名保存失败")); }}>
+              <label className="theme-setting">主题<select aria-label="主题" value={theme} onChange={(event) => onThemeChange(event.target.value as ThemeName)}>{themes.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+              <div className="theme-swatches">{themes.map((item) => <button type="button" key={item.value} aria-pressed={theme === item.value} className={`theme-swatch swatch-${item.value}${theme === item.value ? " active" : ""}`} onClick={() => onThemeChange(item.value)}><span /><strong>{item.label}</strong></button>)}</div>
+              <form className="appearance-name-editor" onSubmit={(event) => { event.preventDefault(); const nextName = displayNameDraft.trim(); setAppearanceStatus("正在保存用户名…"); void onSettingsChange({ display_name: nextName }).then((saved) => { if (String(saved.display_name || "") !== nextName) throw new Error("后端没有保存用户名，请更新后端后重试"); setAppearanceStatus("用户名已保存"); }).catch((error) => setAppearanceStatus(error instanceof Error ? error.message : "用户名保存失败")); }}>
                 <label>用户名<input maxLength={40} value={displayNameDraft} onChange={(event) => setDisplayNameDraft(event.target.value)} placeholder="输入侧栏显示名称" /></label>
                 <button className="primary-button">保存用户名</button>
                 <p className="form-status" aria-live="polite">{appearanceStatus}</p>

@@ -1,19 +1,34 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { saveFile } from "../../adapters/native/files";
-import { getApiBase, requestJson } from "../../adapters/fastapi/client";
-import type { Favorite, Persona, Provider, Worldbook } from "../../domain/types";
+import { fastApi, getApiBase, requestJson } from "../../adapters/fastapi/client";
+import { isStandaloneAndroid } from "../../adapters/standalone/store";
+import type { BoardRecord, DreamRecord, Favorite, JournalRecord, Persona, Provider, Worldbook } from "../../domain/types";
 import type { SettingsTab } from "../settings/SettingsPanel";
 
 export type FeatureSpace = "favorites" | "life" | "correspondence" | "reading" | "cinema" | "listening" | "roleplay" | "journal" | "board" | "dream";
 
 interface BaseEntry { id: string; persona_key: string; created_at: string; updated_at: string }
-interface JournalEntry extends BaseEntry { title: string; content: string; space: "private" | "shared" | "ai"; author: "user" | "ai"; visible_to_user: boolean; visible_to_ai: boolean }
+interface JournalEntry extends BaseEntry { title: string; content: string; space: "user" | "shared" | "ai"; author: "user" | "ai"; visible_to_user: boolean; visible_to_ai: boolean; parlor_id?: string | null; archive_status?: string | null }
 type JournalTrigger = "manual" | "scheduled" | "catch_up";
 interface JournalSchedule extends BaseEntry { enabled: boolean; interval_hours: number; daily_limit: number; visible_to_user: boolean; next_run_at: string; last_run_at?: string; day_key?: string; day_count?: number; guidance: string }
 interface JournalAudit extends BaseEntry { trigger: JournalTrigger; status: "started" | "success" | "failed" | "skipped"; detail: string; journal_id?: string }
-interface BoardEntry extends BaseEntry { content: string; author: "user" | "ai"; visible_to_user: boolean; visible_to_ai: boolean; reply_to?: string }
-interface DreamEntry extends BaseEntry { title: string; content: string; owner: "user" | "ai"; isolated: boolean; claimed: boolean }
-interface LifeEntry extends BaseEntry { kind: string; occurred_at: string; amount?: number; title: string; category: string; note: string; visible_to_ai: boolean }
+interface BoardEntry extends BaseEntry { content: string; author: string; author_role?: "user" | "assistant" | string; visible_to_user: boolean; visible_to_ai: boolean; reply_to?: string | null; wake_due_at?: string | null }
+interface DreamEntry extends BaseEntry { title: string; raw_text: string; kind: "dream" | "quarantined"; summary: string; necropsy: string; claimed: boolean; claim_note?: string }
+type MemoStyle = "paper" | "tape" | "outline";
+type MemoTone = "theme" | "accent" | "soft" | "alert" | "ink";
+type MemoPattern = "plain" | "ruled" | "grid";
+interface LifeEntry extends BaseEntry {
+  kind: string;
+  occurred_at: string;
+  amount?: number;
+  title: string;
+  category: string;
+  note: string;
+  visible_to_ai: boolean;
+  memo_style: MemoStyle;
+  memo_tone: MemoTone;
+  memo_pattern: MemoPattern;
+}
 interface Contact extends BaseEntry { display_name: string; platform: string; stable_id: string; ai_approved: boolean; user_approved: boolean; blocked: boolean; whitelisted?: boolean }
 interface Mail extends BaseEntry { contact_id: string; direction: "inbound" | "outbound"; subject: string; content: string; status: string; safety_reason?: string; delivered_at?: string | null; reply_to?: string }
 interface ParlorConfig extends BaseEntry { host_persona_key: string; summary_provider_id: string; visibility: "full" | "summary"; allow_web: boolean; allow_memory: boolean }
@@ -27,6 +42,19 @@ interface CorrespondenceOverview {
   parlors: Array<{ id: string; status: string; started_at: string; ended_at?: string | null; end_reason?: string; summary?: string }>;
 }
 
+interface ParlorArchive {
+  parlor_id: string;
+  topic: string;
+  summary: string;
+  participants?: string[];
+  keywords?: string[];
+  status: string;
+  deletion_decision?: string | null;
+  deletion_reason?: string;
+  created_at: string;
+  decided_at?: string | null;
+}
+
 interface SpaceData {
   journals: JournalEntry[];
   journalSchedules: JournalSchedule[];
@@ -37,24 +65,136 @@ interface SpaceData {
   contacts: Contact[];
   mail: Mail[];
   parlorConfigs: ParlorConfig[];
+  boardWakes: Array<Record<string, unknown>>;
   roleplays: RoleplayStory[];
   books: BookState[];
   mediaNotes: MediaNote[];
 }
 
 const storeKey = "atherloom-react:feature-spaces:v1";
-const blankData = (): SpaceData => ({ journals: [], journalSchedules: [], journalAudit: [], board: [], dreams: [], life: [], contacts: [], mail: [], parlorConfigs: [], roleplays: [], books: [], mediaNotes: [] });
+const blankData = (): SpaceData => ({ journals: [], journalSchedules: [], journalAudit: [], board: [], dreams: [], life: [], contacts: [], mail: [], parlorConfigs: [], boardWakes: [], roleplays: [], books: [], mediaNotes: [] });
 const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}-${crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 const localDayKey = (value = new Date()) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 const afterHours = (hours: number) => new Date(Date.now() + Math.max(1, hours) * 60 * 60 * 1000).toISOString();
+const persistedBoolean = (value: unknown, fallback = false) => typeof value === "boolean" ? value : typeof value === "number" ? value !== 0 : fallback;
+const memoStyles = [
+  { value: "paper", label: "纸笺", hint: "柔和纸边" },
+  { value: "tape", label: "贴签", hint: "像刚贴上" },
+  { value: "outline", label: "札记", hint: "清楚边框" },
+] as const satisfies ReadonlyArray<{ value: MemoStyle; label: string; hint: string }>;
+const memoTones = [
+  { value: "theme", label: "主题本色" },
+  { value: "accent", label: "强调色" },
+  { value: "soft", label: "雾色" },
+  { value: "alert", label: "醒目色" },
+  { value: "ink", label: "墨色" },
+] as const satisfies ReadonlyArray<{ value: MemoTone; label: string }>;
+const memoPatterns = [
+  { value: "plain", label: "素纸" },
+  { value: "ruled", label: "横线" },
+  { value: "grid", label: "方格" },
+] as const satisfies ReadonlyArray<{ value: MemoPattern; label: string }>;
+
+function memoStyleOf(value: unknown): MemoStyle {
+  return memoStyles.some((option) => option.value === value) ? value as MemoStyle : "paper";
+}
+
+function memoToneOf(value: unknown): MemoTone {
+  return memoTones.some((option) => option.value === value) ? value as MemoTone : "theme";
+}
+
+function memoPatternOf(value: unknown): MemoPattern {
+  return memoPatterns.some((option) => option.value === value) ? value as MemoPattern : "plain";
+}
+
+function journalEntryOf(value: JournalRecord | Record<string, unknown>): JournalEntry {
+  const rawSpace = String(value.space || "user");
+  return {
+    ...(value as unknown as BaseEntry),
+    id: String(value.id || ""),
+    persona_key: String(value.persona_key || "__default__"),
+    created_at: String(value.created_at || now()),
+    updated_at: String(value.updated_at || value.created_at || now()),
+    title: String(value.title || "无题日记"),
+    content: String(value.content || ""),
+    space: rawSpace === "ai" ? "ai" : rawSpace === "shared" ? "shared" : "user",
+    author: value.author === "ai" ? "ai" : "user",
+    visible_to_user: persistedBoolean(value.visible_to_user, true),
+    visible_to_ai: persistedBoolean(value.visible_to_ai, rawSpace === "shared" || rawSpace === "ai"),
+    parlor_id: typeof value.parlor_id === "string" ? value.parlor_id : null,
+    archive_status: typeof value.archive_status === "string" ? value.archive_status : null,
+  };
+}
+
+function boardEntryOf(value: BoardRecord | Record<string, unknown>): BoardEntry {
+  return {
+    ...(value as unknown as BaseEntry),
+    id: String(value.id || ""),
+    persona_key: String(value.persona_key || "__default__"),
+    created_at: String(value.created_at || now()),
+    updated_at: String(value.updated_at || value.created_at || now()),
+    content: String(value.content || ""),
+    author: String(value.author || "user"),
+    author_role: typeof value.author_role === "string" ? value.author_role : value.author === "ai" ? "assistant" : "user",
+    visible_to_user: persistedBoolean(value.visible_to_user, true),
+    visible_to_ai: persistedBoolean(value.visible_to_ai, true),
+    reply_to: typeof value.reply_to === "string" ? value.reply_to : null,
+    wake_due_at: typeof value.wake_due_at === "string" ? value.wake_due_at : null,
+  };
+}
+
+function dreamEntryOf(value: DreamRecord | Record<string, unknown>): DreamEntry {
+  const legacy = value as Record<string, unknown>;
+  const rawText = String(value.raw_text || legacy.content || "");
+  const kind = value.kind === "quarantined" || legacy.isolated ? "quarantined" : "dream";
+  return {
+    ...(value as unknown as BaseEntry),
+    id: String(value.id || ""),
+    persona_key: String(value.persona_key || "__default__"),
+    created_at: String(value.created_at || now()),
+    updated_at: String(value.updated_at || value.created_at || now()),
+    title: String(value.title || "没有名字的梦"),
+    raw_text: rawText,
+    kind,
+    summary: String(value.summary || rawText.replace(/\s+/g, " ").slice(0, 180)),
+    necropsy: String(value.necropsy || ""),
+    claimed: persistedBoolean(value.claimed, kind === "dream"),
+    claim_note: typeof value.claim_note === "string" ? value.claim_note : "",
+  };
+}
+
+function lifeEntryOf(value: LifeEntry | Record<string, unknown>): LifeEntry {
+  return {
+    ...(value as unknown as BaseEntry),
+    id: String(value.id || ""),
+    persona_key: String(value.persona_key || "__default__"),
+    created_at: String(value.created_at || now()),
+    updated_at: String(value.updated_at || value.created_at || now()),
+    kind: String(value.kind || "memo"),
+    occurred_at: String(value.occurred_at || localDayKey()),
+    amount: typeof value.amount === "number" && Number.isFinite(value.amount) ? value.amount : undefined,
+    title: String(value.title || "未命名记录"),
+    category: String(value.category || ""),
+    note: String(value.note || ""),
+    visible_to_ai: persistedBoolean(value.visible_to_ai, false),
+    memo_style: memoStyleOf(value.memo_style),
+    memo_tone: memoToneOf(value.memo_tone),
+    memo_pattern: memoPatternOf(value.memo_pattern),
+  };
+}
 
 function readData(): SpaceData {
   try {
     const value = JSON.parse(localStorage.getItem(storeKey) || "null") as Partial<SpaceData> | null;
     if (!value) return blankData();
     const empty = blankData();
-    return Object.fromEntries(Object.keys(empty).map((key) => [key, Array.isArray(value[key as keyof SpaceData]) ? value[key as keyof SpaceData] : []])) as unknown as SpaceData;
+    const migrated = Object.fromEntries(Object.keys(empty).map((key) => [key, Array.isArray(value[key as keyof SpaceData]) ? value[key as keyof SpaceData] : []])) as unknown as SpaceData;
+    migrated.journals = migrated.journals.map((entry) => journalEntryOf(entry as unknown as Record<string, unknown>));
+    migrated.board = migrated.board.map((entry) => boardEntryOf(entry as unknown as Record<string, unknown>));
+    migrated.dreams = migrated.dreams.map((entry) => dreamEntryOf(entry as unknown as Record<string, unknown>));
+    migrated.life = migrated.life.map((entry) => lifeEntryOf(entry as unknown as Record<string, unknown>));
+    return migrated;
   } catch {
     return blankData();
   }
@@ -97,8 +237,8 @@ interface FeatureHubProps {
   onOpenFavorite: (conversationId: string) => Promise<void>;
   onUnfavorite: (messageId: string) => Promise<void>;
   onSendToAssistant: (content: string) => Promise<string | undefined>;
-  onGeneratePrivateJournal: (personaKey: string, trigger: JournalTrigger, guidance: string) => Promise<{ title: string; content: string }>;
-  onGeneratePrivateDream: (personaKey: string, guidance: string) => Promise<{ title: string; content: string }>;
+  onGeneratePrivateJournal: (personaKey: string, trigger: JournalTrigger, guidance: string, visibleToUser: boolean) => Promise<{ title: string; content: string }>;
+  onGeneratePrivateDream: (personaKey: string) => Promise<{ title: string; content: string }>;
 }
 
 function timestampLabel(value: string) {
@@ -117,17 +257,43 @@ export function FeatureHub(props: FeatureHubProps) {
   const dataRef = useRef(data);
   const generatorRef = useRef(onGeneratePrivateJournal);
   const journalRunningRef = useRef(new Set<string>());
+  const currentPersonaRef = useRef(personaKey);
+  const writingRequestRef = useRef(0);
+  const stickyRequestRef = useRef(0);
   const contentRef = useRef<HTMLElement>(null);
   const workspaceNavRef = useRef<HTMLElement>(null);
   const layerRef = useRef<HTMLDivElement>(null);
   const hubRef = useRef<HTMLElement>(null);
   const onCloseRef = useRef(onClose);
   const modalOpen = Boolean(open);
+  const writingOpen = open === "journal" || open === "board" || open === "dream";
+  const standaloneWriting = isStandaloneAndroid();
+  const [storageStatus, setStorageStatus] = useState("");
+  const [writingLoad, setWritingLoad] = useState<{ status: "idle" | "loading" | "ready" | "error"; message: string }>({ status: "idle", message: "" });
+  const [serverSealedCount, setServerSealedCount] = useState(0);
+  const [serverBoardSealedCount, setServerBoardSealedCount] = useState(0);
+  const [stickyQueue, setStickyQueue] = useState<Array<BoardEntry & { persona_name: string }>>([]);
+  const [stickyReply, setStickyReply] = useState("");
+  const [stickyStatus, setStickyStatus] = useState("");
+  const [stickyBusy, setStickyBusy] = useState(false);
+  const seenBoardRef = useRef<string[]>([]);
+  const deferredBoardRef = useRef(new Set<string>());
+  currentPersonaRef.current = personaKey;
 
   useEffect(() => {
+    const latest = readData();
+    // Journals, board notes, dreams and wake leases are owned by the API
+    // adapter in both modes. Preserve its latest committed version so a
+    // schedule/life-space React update cannot overwrite a concurrent write.
+    const persisted = { ...data, journals: latest.journals, board: latest.board, dreams: latest.dreams, boardWakes: latest.boardWakes };
     dataRef.current = data;
-    localStorage.setItem(storeKey, JSON.stringify(data));
-  }, [data]);
+    try {
+      localStorage.setItem(storeKey, JSON.stringify(persisted));
+      setStorageStatus("");
+    } catch (error) {
+      setStorageStatus("本机写作空间保存失败：" + (error instanceof Error ? error.message : "存储空间可能已满"));
+    }
+  }, [data, standaloneWriting]);
   useEffect(() => { generatorRef.current = onGeneratePrivateJournal; }, [onGeneratePrivateJournal]);
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
   useEffect(() => {
@@ -183,6 +349,102 @@ export function FeatureHub(props: FeatureHubProps) {
     return () => window.cancelAnimationFrame(frame);
   }, [open]);
 
+  const loadWritingWorkspace = useCallback(async (targetPersonaKey = personaKey) => {
+    const requestId = ++writingRequestRef.current;
+    if (!standaloneWriting) {
+      // Never render device/cache rows under a server synchronization label.
+      setData((current) => ({
+        ...current,
+        journals: current.journals.filter((entry) => entry.persona_key !== targetPersonaKey),
+        board: current.board.filter((entry) => entry.persona_key !== targetPersonaKey),
+        dreams: current.dreams.filter((entry) => entry.persona_key !== targetPersonaKey),
+      }));
+    }
+    setServerSealedCount(0);
+    setServerBoardSealedCount(0);
+    setWritingLoad({ status: "loading", message: standaloneWriting ? "正在读取这台设备上的日记、留言与梦境…" : "正在从服务器同步日记、留言与梦境…" });
+    try {
+      const [journals, board, dreams] = await Promise.all([
+        fastApi.listJournals(targetPersonaKey),
+        fastApi.listBoard(targetPersonaKey),
+        fastApi.listDreams(targetPersonaKey),
+      ]);
+      if (requestId !== writingRequestRef.current || targetPersonaKey !== currentPersonaRef.current) return;
+      const journalRows = (Array.isArray(journals.entries) ? journals.entries : []).map(journalEntryOf);
+      const boardRows = (Array.isArray(board.messages) ? board.messages : []).map(boardEntryOf);
+      const dreamRows = (Array.isArray(dreams.entries) ? dreams.entries : []).map(dreamEntryOf);
+      setData((current) => ({
+        ...current,
+        journals: [...journalRows, ...current.journals.filter((entry) => entry.persona_key !== targetPersonaKey)],
+        board: [...boardRows, ...current.board.filter((entry) => entry.persona_key !== targetPersonaKey)],
+        dreams: [...dreamRows, ...current.dreams.filter((entry) => entry.persona_key !== targetPersonaKey)],
+      }));
+      setServerSealedCount(Math.max(0, Number(journals.sealed_count || 0)));
+      setServerBoardSealedCount(Math.max(0, Number(board.sealed_count || 0)));
+      setWritingLoad({ status: "ready", message: standaloneWriting ? "已读取设备本地写作库；内容留在这台设备。" : "已与服务器写作库同步。" });
+    } catch (error) {
+      if (requestId !== writingRequestRef.current || targetPersonaKey !== currentPersonaRef.current) return;
+      setWritingLoad({ status: "error", message: "写作库读取失败：" + (error instanceof Error ? error.message : "未知错误") });
+    }
+  }, [personaKey, standaloneWriting]);
+
+  const loadStickyBoards = useCallback(async () => {
+    const requestId = ++stickyRequestRef.current;
+    const personaKeys = Array.from(new Set(["__default__", ...personas.map((persona) => persona.id)]));
+    const results = await Promise.allSettled(personaKeys.map(async (key) => ({ key, payload: await fastApi.listBoard(key) })));
+    if (requestId !== stickyRequestRef.current) return;
+    const successful = results.filter((result): result is PromiseFulfilledResult<{ key: string; payload: Awaited<ReturnType<typeof fastApi.listBoard>> }> => result.status === "fulfilled");
+    if (!successful.length) {
+      setStickyStatus("暂时无法读取人格留言提醒。");
+      return;
+    }
+    try {
+      const parsed = JSON.parse(localStorage.getItem("atherloom-react:seen-board-notes") || "[]") as unknown;
+      seenBoardRef.current = Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string").slice(-500) : [];
+    } catch {
+      seenBoardRef.current = [];
+      setStorageStatus("留言提醒的已读状态无法读取；本机存储可能不可用。");
+    }
+    const seen = new Set(seenBoardRef.current);
+    const notes = successful.flatMap(({ value }) => {
+      const personaNameForNote = value.key === "__default__" ? "默认人格" : personas.find((persona) => persona.id === value.key)?.name || "未命名人格";
+      return (Array.isArray(value.payload.messages) ? value.payload.messages : []).map(boardEntryOf)
+        .filter((entry) => entry.visible_to_user && (entry.author_role === "assistant" || entry.author === "ai"))
+        .map((entry) => ({ ...entry, persona_name: personaNameForNote }));
+    }).filter((entry) => !seen.has(entry.id) && !deferredBoardRef.current.has(entry.id))
+      .sort((left, right) => left.created_at.localeCompare(right.created_at))
+      .slice(0, 12);
+    setStickyQueue(notes);
+    setStickyStatus("");
+  }, [personas]);
+
+  useEffect(() => {
+    if (!writingOpen) return;
+    void loadWritingWorkspace(personaKey);
+    return () => { writingRequestRef.current += 1; };
+  }, [loadWritingWorkspace, personaKey, writingOpen]);
+
+  useEffect(() => {
+    void loadStickyBoards();
+    const handleWriting = (event: Event) => {
+      const detail = (event as CustomEvent<{ kind?: string; persona_key?: string }>).detail;
+      if (!detail || detail.kind === "board") void loadStickyBoards();
+      if (detail?.kind === "life") setData(readData());
+      if (writingOpen && (!detail?.persona_key || detail.persona_key === currentPersonaRef.current)) void loadWritingWorkspace(currentPersonaRef.current);
+    };
+    const handleWake = () => {
+      void loadStickyBoards();
+      if (writingOpen) void loadWritingWorkspace(currentPersonaRef.current);
+    };
+    window.addEventListener("atherloom:writing-changed", handleWriting);
+    window.addEventListener("atherloom:board-wake-delivered", handleWake);
+    return () => {
+      stickyRequestRef.current += 1;
+      window.removeEventListener("atherloom:writing-changed", handleWriting);
+      window.removeEventListener("atherloom:board-wake-delivered", handleWake);
+    };
+  }, [loadStickyBoards, loadWritingWorkspace, writingOpen]);
+
   const generateAiJournal = useCallback(async (targetPersonaKey: string, trigger: JournalTrigger, visibleToUser: boolean, guidance: string) => {
     if (journalRunningRef.current.has(targetPersonaKey)) throw new Error("这个人格正在写日记，请稍候");
     journalRunningRef.current.add(targetPersonaKey);
@@ -197,10 +459,15 @@ export function FeatureHub(props: FeatureHubProps) {
       status: "started",
       detail: trigger === "manual" ? "手动写作已开始" : trigger === "catch_up" ? "错过时段，开始补写" : "到达计划时间，开始写作",
     };
-    setData((current) => ({ ...current, journalAudit: [started, ...current.journalAudit].slice(0, 300) }));
+    setData((current) => ({ ...current, journalAudit: [started, ...current.journalAudit.filter((entry) => entry.id !== auditId)].slice(0, 300) }));
     try {
+      if (!standaloneWriting) {
+        throw new Error("当前旧 FastAPI 没有无副作用的日记草稿模式。为避免重复写入或泄露密封内容，连接服务器时暂不执行 AI 日记生成；手写日记仍可正常保存。");
+      }
       const earlierPages = dataRef.current.journals
-        .filter((entry) => entry.persona_key === targetPersonaKey && entry.visible_to_ai)
+        // A user-visible new page must never quote or summarize a sealed old
+        // page. Sealed generations may retain their own private continuity.
+        .filter((entry) => entry.persona_key === targetPersonaKey && entry.visible_to_ai && (!visibleToUser || entry.visible_to_user))
         .sort((left, right) => right.updated_at.localeCompare(left.updated_at))
         .slice(0, 6)
         .map((entry) => `${entry.title}\n${entry.content}`)
@@ -210,26 +477,33 @@ export function FeatureHub(props: FeatureHubProps) {
         guidance.trim() ? `本次线索：${guidance.trim()}` : "",
         earlierPages ? `你可继续回望的最近日记：\n${earlierPages}` : "",
       ].filter(Boolean).join("\n\n");
-      const draft = await generatorRef.current(targetPersonaKey, trigger, writingContext);
+      const draft = await generatorRef.current(targetPersonaKey, trigger, writingContext, visibleToUser);
       if (!draft.content.trim()) throw new Error("模型没有返回日记正文");
-      const finishedAt = now();
-      const journal: JournalEntry = {
-        id: id("ai-journal"),
-        persona_key: targetPersonaKey,
-        created_at: finishedAt,
-        updated_at: finishedAt,
+      const saved = await fastApi.createJournal(targetPersonaKey, {
         title: draft.title.trim().slice(0, 120) || "一页未题名的日记",
         content: draft.content.trim().slice(0, 30000),
         space: "ai",
         author: "ai",
         visible_to_user: visibleToUser,
         visible_to_ai: true,
-      };
+      });
+      const journal = journalEntryOf(saved);
+      const finishedAt = journal.updated_at || now();
       setData((current) => {
         const day = localDayKey();
+        const completed: JournalAudit = {
+          id: auditId,
+          persona_key: targetPersonaKey,
+          created_at: startedAt,
+          updated_at: finishedAt,
+          trigger,
+          status: "success",
+          detail: visibleToUser ? `写作完成 · ${journal.title} · 对你可见` : "写作完成 · 内容已密封",
+          journal_id: journal.id,
+        };
         return {
           ...current,
-          journals: [journal, ...current.journals],
+          journals: [journal, ...current.journals.filter((entry) => entry.id !== journal.id)],
           journalSchedules: current.journalSchedules.map((schedule) => schedule.persona_key === targetPersonaKey && trigger !== "manual" ? {
             ...schedule,
             last_run_at: finishedAt,
@@ -238,19 +512,15 @@ export function FeatureHub(props: FeatureHubProps) {
             day_count: schedule.day_key === day ? Number(schedule.day_count || 0) + 1 : 1,
             updated_at: finishedAt,
           } : schedule),
-          journalAudit: current.journalAudit.map((entry) => entry.id === auditId ? {
-            ...entry,
-            status: "success",
-            detail: visibleToUser ? `写作完成 · ${journal.title} · 对你可见` : "写作完成 · 内容已密封",
-            journal_id: journal.id,
-            updated_at: finishedAt,
-          } : entry),
+          journalAudit: current.journalAudit.map((entry) => entry.id === auditId ? completed : entry),
         };
       });
+      window.dispatchEvent(new CustomEvent("atherloom:writing-changed", { detail: { kind: "journal", persona_key: targetPersonaKey } }));
       return journal;
     } catch (error) {
       const failedAt = now();
       const detail = error instanceof Error ? error.message : "日记生成失败";
+      const failed: JournalAudit = { id: auditId, persona_key: targetPersonaKey, created_at: startedAt, updated_at: failedAt, trigger, status: "failed", detail };
       setData((current) => ({
         ...current,
         journalSchedules: current.journalSchedules.map((schedule) => schedule.persona_key === targetPersonaKey && trigger !== "manual" ? {
@@ -258,13 +528,13 @@ export function FeatureHub(props: FeatureHubProps) {
           next_run_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
           updated_at: failedAt,
         } : schedule),
-        journalAudit: current.journalAudit.map((entry) => entry.id === auditId ? { ...entry, status: "failed", detail, updated_at: failedAt } : entry),
+        journalAudit: current.journalAudit.map((entry) => entry.id === auditId ? failed : entry),
       }));
       throw error;
     } finally {
       journalRunningRef.current.delete(targetPersonaKey);
     }
-  }, []);
+  }, [standaloneWriting]);
 
   useEffect(() => {
     const inspectSchedules = () => {
@@ -273,6 +543,20 @@ export function FeatureHub(props: FeatureHubProps) {
       const day = localDayKey();
       for (const schedule of snapshot.journalSchedules) {
         if (!schedule.enabled || journalRunningRef.current.has(schedule.persona_key)) continue;
+        if (!standaloneWriting) {
+          const skippedAt = now();
+          const skipped: JournalAudit = {
+            id: id("journal-audit"), persona_key: schedule.persona_key, created_at: skippedAt, updated_at: skippedAt,
+            trigger: "scheduled", status: "skipped",
+            detail: "旧 FastAPI 普通聊天没有无副作用的草稿模式；AI 写作计划已暂停，避免重复写入或泄露密封内容",
+          };
+          setData((current) => ({
+            ...current,
+            journalSchedules: current.journalSchedules.map((entry) => entry.id === schedule.id ? { ...entry, enabled: false, updated_at: skippedAt } : entry),
+            journalAudit: [skipped, ...current.journalAudit].slice(0, 300),
+          }));
+          continue;
+        }
         const dueAt = new Date(schedule.next_run_at).getTime();
         if (!Number.isFinite(dueAt) || dueAt > currentTime) continue;
         const usedToday = schedule.day_key === day ? Number(schedule.day_count || 0) : 0;
@@ -297,9 +581,77 @@ export function FeatureHub(props: FeatureHubProps) {
     inspectSchedules();
     const timer = window.setInterval(inspectSchedules, 60_000);
     return () => window.clearInterval(timer);
-  }, [generateAiJournal]);
+  }, [generateAiJournal, standaloneWriting]);
 
-  if (!open) return null;
+  const providerIdForPersona = (targetPersonaKey: string) => {
+    const target = personas.find((persona) => persona.id === targetPersonaKey);
+    if (target) {
+      const configured = target.config?.provider_id || target.provider_id || null;
+      return configured && providers.some((provider) => provider.id === configured && provider.enabled !== false) ? configured : null;
+    }
+    return targetPersonaKey === "__default__" ? providers.find((provider) => provider.enabled !== false)?.id || null : null;
+  };
+  const rememberSticky = (entryId: string) => {
+    const next = [...seenBoardRef.current.filter((value) => value !== entryId), entryId].slice(-500);
+    seenBoardRef.current = next;
+    try {
+      localStorage.setItem("atherloom-react:seen-board-notes", JSON.stringify(next));
+      setStorageStatus("");
+    } catch (error) {
+      setStorageStatus("留言提醒已读状态保存失败：" + (error instanceof Error ? error.message : "存储空间可能已满"));
+    }
+  };
+  const finishSticky = (markSeen: boolean) => {
+    const current = stickyQueue[0];
+    if (!current) return;
+    if (markSeen) rememberSticky(current.id);
+    else deferredBoardRef.current.add(current.id);
+    setStickyQueue((queue) => queue.slice(1));
+    setStickyReply("");
+    setStickyStatus("");
+  };
+  const replyToSticky = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const current = stickyQueue[0];
+    if (!current || !stickyReply.trim() || stickyBusy) return;
+    setStickyBusy(true);
+    setStickyStatus("正在贴出回复…");
+    try {
+      const wakeProviderId = providerIdForPersona(current.persona_key);
+      const saved = boardEntryOf(await fastApi.createBoardMessage(current.persona_key, {
+        content: stickyReply.trim().slice(0, 5000),
+        author: "user",
+        visible_to_user: true,
+        visible_to_ai: true,
+        reply_to: current.id,
+        wake_after_minutes: wakeProviderId ? 10 : undefined,
+        wake_provider_id: wakeProviderId,
+      }));
+      rememberSticky(current.id);
+      setStickyQueue((queue) => queue.slice(1));
+      setStickyReply("");
+      setStickyStatus(saved.wake_due_at ? `回复已贴出，将在 ${timestampLabel(saved.wake_due_at)} 提醒对方。` : standaloneWriting ? wakeProviderId ? "回复已贴出；本机没有返回唤醒时间，请稍后检查。" : "回复已保存，但所属人格尚未设置唤醒线路。" : "回复已同步；服务器没有返回唤醒安排。");
+      window.dispatchEvent(new CustomEvent("atherloom:writing-changed", { detail: { kind: "board", persona_key: current.persona_key } }));
+    } catch (error) {
+      setStickyStatus("回复没有贴出：" + (error instanceof Error ? error.message : "未知错误"));
+    } finally {
+      setStickyBusy(false);
+    }
+  };
+
+  if (!open) {
+    const sticky = stickyQueue[0];
+    return sticky ? <aside className="board-wake-sticky" aria-label={`${sticky.persona_name}的新留言`}>
+      <header><span>NEW NOTE · {stickyQueue.length} / 12</span><strong>{sticky.persona_name} 留了一张便笺</strong></header>
+      <p>{sticky.content}</p>
+      <time>{timestampLabel(sticky.created_at)}</time>
+      <form onSubmit={(event) => void replyToSticky(event)}>
+        <textarea required maxLength={5000} rows={3} value={stickyReply} onChange={(event) => setStickyReply(event.target.value)} placeholder={`回复 ${sticky.persona_name}…`} aria-label="回复这张留言" />
+        <small>{stickyStatus || (standaloneWriting ? "所属人格有可用线路时，约十分钟提醒；应用关闭则下次打开补做。" : "回复后是否安排唤醒，以服务器返回结果为准。")}</small>
+        <div><button type="button" className="secondary-button" onClick={() => finishSticky(false)}>稍后</button><button type="button" className="secondary-button" onClick={() => finishSticky(true)}>{stickyQueue.length > 1 ? "下一张" : "收好"}</button><button className="primary-button" disabled={stickyBusy}>{stickyBusy ? "正在回复…" : "回复"}</button></div>
+      </form>
+    </aside> : null;
+  }
 
   const update = <Key extends keyof SpaceData>(key: Key, rows: SpaceData[Key]) => setData((current) => ({ ...current, [key]: rows }));
   const shared = {
@@ -309,13 +661,18 @@ export function FeatureHub(props: FeatureHubProps) {
     personas,
     providers,
     update,
-    aiContextAvailable: Boolean(window.AtherloomNative && !getApiBase()),
-    prependDream: (entry: DreamEntry) => setData((current) => ({ ...current, dreams: [entry, ...current.dreams] })),
+    aiContextAvailable: standaloneWriting || writingLoad.status === "ready",
+    writingLoad,
+    sealedCount: serverSealedCount,
+    boardSealedCount: serverBoardSealedCount,
+    writingSyncKind: standaloneWriting ? "device" as const : "server" as const,
+    storageStatus,
+    onRetryWriting: () => void loadWritingWorkspace(personaKey),
+    providerId: providerIdForPersona(personaKey),
     onSendToAssistant,
     onGenerateJournal: generateAiJournal,
     onGenerateDream: onGeneratePrivateDream,
   };
-  const writingOpen = open === "journal" || open === "board" || open === "dream";
   const correspondenceOpen = open === "correspondence";
   const workspaceLabel = labels.find(([key]) => key === open)?.[1] || "功能空间";
   const changeSpaceAtTop = (space: FeatureSpace) => {
@@ -328,7 +685,7 @@ export function FeatureHub(props: FeatureHubProps) {
       <section ref={hubRef} className={`feature-hub${writingOpen ? " writing-workspace" : ""}${correspondenceOpen ? " correspondence-workspace" : ""}`} role="dialog" aria-modal="true" aria-label={workspaceLabel}>
         <header className="feature-hub-header">
           <div>
-            <span>{writingOpen ? "LOCAL WORKSPACE" : correspondenceOpen ? "AI CORRESPONDENCE" : "ATHERLOOM SPACES"}</span>
+            <span>{writingOpen ? "WRITING WORKSPACE" : correspondenceOpen ? "AI CORRESPONDENCE" : "ATHERLOOM SPACES"}</span>
             <h2>{writingOpen ? "设置" : workspaceLabel}</h2>
             {!writingOpen ? <p>{correspondenceOpen ? `${personaName}自己的信箱与会客厅。` : `${personaName}的独立空间`}</p> : null}
           </div>
@@ -343,7 +700,7 @@ export function FeatureHub(props: FeatureHubProps) {
         </nav> : correspondenceOpen ? null : <nav className="feature-hub-nav" aria-label="功能空间">{labels.map(([key, label]) => <button type="button" className={open === key ? "active" : ""} onClick={() => changeSpaceAtTop(key)} key={key}>{label}</button>)}</nav>}
         <main ref={contentRef} className={`feature-hub-content${writingOpen ? " writing-workspace-content" : ""}${correspondenceOpen ? " correspondence-workspace-content" : ""}`}>
           {writingOpen ? <div className="writing-workspace-intro">
-            <div><h3>日记与留言</h3><p>在本机保存并明确标记可见范围；是否进入 AI 上下文会按当前运行模式说明。</p></div>
+            <div><h3>日记与留言</h3><p>{standaloneWriting ? "日记与留言按可见范围提供给本机人格；梦境独立保存在这台设备。" : "日记与留言按服务端可见范围处理；梦境保持独立归档，不因认领自动进入聊天上下文。"}</p></div>
             <span>{personaName}</span>
           </div> : null}
           {writingOpen ? <nav className="writing-space-tabs" aria-label="日记与留言分类">
@@ -352,7 +709,7 @@ export function FeatureHub(props: FeatureHubProps) {
             <button type="button" className={open === "dream" ? "active" : ""} aria-current={open === "dream" ? "page" : undefined} onClick={() => changeSpaceAtTop("dream")}>梦库</button>
           </nav> : null}
           {open === "favorites" ? <FavoritesSpace favorites={favorites} onOpen={onOpenFavorite} onRemove={onUnfavorite} /> : null}
-          {open === "life" ? <LifeSpace {...shared} /> : null}
+          {open === "life" ? <LifeSpace {...shared} aiContextAvailable={standaloneWriting} /> : null}
           {open === "correspondence" ? <CorrespondenceSpace {...shared} onOpenSettingsTab={onOpenSettingsTab} /> : null}
           {open === "journal" ? <WritingSpace mode="journal" {...shared} /> : null}
           {open === "board" ? <WritingSpace mode="board" {...shared} /> : null}
@@ -381,14 +738,44 @@ type SharedProps = {
   providers: Provider[];
   update: <Key extends keyof SpaceData>(key: Key, rows: SpaceData[Key]) => void;
   aiContextAvailable: boolean;
-  prependDream: (entry: DreamEntry) => void;
+  writingLoad: { status: "idle" | "loading" | "ready" | "error"; message: string };
+  sealedCount: number;
+  boardSealedCount: number;
+  writingSyncKind: "server" | "device";
+  storageStatus: string;
+  onRetryWriting: () => void;
+  providerId: string | null;
   onSendToAssistant: (content: string) => Promise<string | undefined>;
   onGenerateJournal: (personaKey: string, trigger: JournalTrigger, visibleToUser: boolean, guidance: string) => Promise<JournalEntry>;
-  onGenerateDream: (personaKey: string, guidance: string) => Promise<{ title: string; content: string }>;
+  onGenerateDream: (personaKey: string) => Promise<{ title: string; content: string }>;
 };
 
+interface LifeDraft {
+  kind: string;
+  occurred_at: string;
+  amount: string;
+  title: string;
+  category: string;
+  note: string;
+  visible_to_ai: boolean;
+  memo_style: MemoStyle;
+  memo_tone: MemoTone;
+  memo_pattern: MemoPattern;
+}
+
 function LifeSpace({ data, personaKey, update, aiContextAvailable }: SharedProps) {
-  const [draft, setDraft] = useState({ kind: "memo", occurred_at: new Date().toISOString().slice(0, 10), amount: "", title: "", category: "", note: "", visible_to_ai: false });
+  const [draft, setDraft] = useState<LifeDraft>({
+    kind: "memo",
+    occurred_at: localDayKey(),
+    amount: "",
+    title: "",
+    category: "",
+    note: "",
+    visible_to_ai: false,
+    memo_style: "paper",
+    memo_tone: "theme",
+    memo_pattern: "plain",
+  });
   const rows = data.life.filter((item) => item.persona_key === personaKey).sort((a, b) => b.occurred_at.localeCompare(a.occurred_at));
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -398,12 +785,169 @@ function LifeSpace({ data, personaKey, update, aiContextAvailable }: SharedProps
   };
   const month = new Date().toISOString().slice(0, 7);
   const total = rows.filter((item) => item.occurred_at.startsWith(month)).reduce((sum, item) => sum + (item.kind === "income" ? Number(item.amount || 0) : item.kind === "expense" ? -Number(item.amount || 0) : 0), 0);
-  return <section className="space-section"><div className="space-heading"><div><h3>日常记录</h3><p>本月收支净额 {total.toFixed(2)}；每条记录可单独标记是否共享给当前人格。</p></div></div><form className="space-form" onSubmit={submit}><label>类型<select value={draft.kind} onChange={(event) => setDraft({ ...draft, kind: event.target.value })}><option value="expense">支出</option><option value="income">收入</option><option value="period">生理期</option><option value="meal">饮食</option><option value="anniversary">纪念日</option><option value="countdown">倒数日</option><option value="memo">备忘</option></select></label><label>日期<input type="date" required value={draft.occurred_at} onChange={(event) => setDraft({ ...draft, occurred_at: event.target.value })} /></label>{["expense", "income"].includes(draft.kind) ? <label>金额<input type="number" min="0" step="0.01" value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} /></label> : null}<label>标题<input required value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label><label>分类<input value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })} /></label><label className="span-all">备注<textarea rows={3} value={draft.note} onChange={(event) => setDraft({ ...draft, note: event.target.value })} /></label><label className="check-row span-all"><input type="checkbox" checked={draft.visible_to_ai} onChange={(event) => setDraft({ ...draft, visible_to_ai: event.target.checked })} /><span>{aiContextAvailable ? "允许当前人格读取这条记录" : "标记为共享（当前 FastAPI 模式暂不读取）"}</span></label><button className="primary-button">保存记录</button></form><div className="space-card-list">{rows.map((item) => <article key={item.id}><header><strong>{item.title}</strong><time>{item.occurred_at}</time></header><p>{item.category}{item.amount !== undefined ? ` · ¥${item.amount.toFixed(2)}` : ""}{item.note ? ` · ${item.note}` : ""}</p><footer><span>{item.visible_to_ai ? aiContextAvailable ? "当前人格可读" : "已标记共享 · FastAPI 暂不读取" : "仅自己可见"}</span><button className="danger-action" type="button" onClick={() => update("life", data.life.filter((row) => row.id !== item.id))}>删除</button></footer></article>)}</div></section>;
+  const previewStyle = memoStyles.find((option) => option.value === draft.memo_style)?.label || "纸笺";
+  const previewTone = memoTones.find((option) => option.value === draft.memo_tone)?.label || "主题本色";
+  const previewPattern = memoPatterns.find((option) => option.value === draft.memo_pattern)?.label || "素纸";
+
+  return (
+    <section className="space-section">
+      <div className="space-heading">
+        <div>
+          <h3>日常记录</h3>
+          <p>本月收支净额 {total.toFixed(2)}；每条记录可单独标记是否共享给当前人格。</p>
+        </div>
+      </div>
+
+      <form className="space-form" onSubmit={submit}>
+        <label>
+          类型
+          <select value={draft.kind} onChange={(event) => setDraft({ ...draft, kind: event.target.value })}>
+            <option value="expense">支出</option>
+            <option value="income">收入</option>
+            <option value="period">生理期</option>
+            <option value="meal">饮食</option>
+            <option value="anniversary">纪念日</option>
+            <option value="countdown">倒数日</option>
+            <option value="memo">备忘</option>
+          </select>
+        </label>
+        <label>
+          日期
+          <input type="date" required value={draft.occurred_at} onChange={(event) => setDraft({ ...draft, occurred_at: event.target.value })} />
+        </label>
+        {["expense", "income"].includes(draft.kind) ? (
+          <label>
+            金额
+            <input type="number" min="0" step="0.01" value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} />
+          </label>
+        ) : null}
+        <label>
+          标题
+          <input required maxLength={120} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
+        </label>
+        <label>
+          分类
+          <input maxLength={80} value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })} />
+        </label>
+        <label className="span-all">
+          备注
+          <textarea rows={3} maxLength={5000} value={draft.note} onChange={(event) => setDraft({ ...draft, note: event.target.value })} />
+        </label>
+
+        {draft.kind === "memo" ? (
+          <fieldset className="memo-appearance span-all" aria-describedby="memo-appearance-help">
+            <legend>便笺外观</legend>
+            <p id="memo-appearance-help">颜色随当前主题变化。你和 AI 创建备忘时，都只能从这套安全外观中选择。</p>
+
+            <div className="memo-choice-columns">
+              <fieldset className="memo-choice-group">
+                <legend>风格</legend>
+                <div className="memo-choice-list">
+                  {memoStyles.map((option) => (
+                    <label key={option.value} className="memo-choice">
+                      <input
+                        type="radio"
+                        name="memo-style"
+                        value={option.value}
+                        checked={draft.memo_style === option.value}
+                        onChange={() => setDraft({ ...draft, memo_style: option.value })}
+                      />
+                      <span><strong>{option.label}</strong><small>{option.hint}</small></span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+
+              <fieldset className="memo-choice-group">
+                <legend>套色</legend>
+                <div className="memo-choice-list memo-tone-choices">
+                  {memoTones.map((option) => (
+                    <label key={option.value} className="memo-choice" data-memo-tone={option.value}>
+                      <input
+                        type="radio"
+                        name="memo-tone"
+                        value={option.value}
+                        checked={draft.memo_tone === option.value}
+                        onChange={() => setDraft({ ...draft, memo_tone: option.value })}
+                      />
+                      <span>{option.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+
+              <fieldset className="memo-choice-group">
+                <legend>纸张纹理</legend>
+                <div className="memo-choice-list">
+                  {memoPatterns.map((option) => (
+                    <label key={option.value} className="memo-choice">
+                      <input
+                        type="radio"
+                        name="memo-pattern"
+                        value={option.value}
+                        checked={draft.memo_pattern === option.value}
+                        onChange={() => setDraft({ ...draft, memo_pattern: option.value })}
+                      />
+                      <span>{option.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            </div>
+
+            <aside
+              className={`memo-live-preview memo-note memo-style-${draft.memo_style} memo-tone-${draft.memo_tone} memo-pattern-${draft.memo_pattern}`}
+              data-memo-style={draft.memo_style}
+              data-memo-tone={draft.memo_tone}
+              data-memo-pattern={draft.memo_pattern}
+              aria-label="备忘录外观实时预览"
+            >
+              <span className="memo-preview-kicker">实时预览 · {previewStyle} · {previewTone} · {previewPattern}</span>
+              <strong>{draft.title.trim() || "在这里留一件别忘的事"}</strong>
+              <p>{draft.note.trim() || "写下备注后，这张便笺会保持当前主题的颜色与纸张质感。"}</p>
+              <footer><span>{draft.category.trim() || "未分类"}</span><time>{draft.occurred_at}</time></footer>
+            </aside>
+          </fieldset>
+        ) : null}
+
+        <label className="check-row span-all">
+          <input type="checkbox" checked={draft.visible_to_ai} onChange={(event) => setDraft({ ...draft, visible_to_ai: event.target.checked })} />
+          <span>{aiContextAvailable ? "允许当前人格读取这条记录" : "标记为共享（当前 FastAPI 模式暂不读取）"}</span>
+        </label>
+        <button className="primary-button">保存记录</button>
+      </form>
+
+      <div className="space-card-list">
+        {rows.map((item) => {
+          const isMemo = item.kind === "memo";
+          return (
+            <article
+              key={item.id}
+              className={isMemo ? `life-entry memo-note memo-style-${item.memo_style} memo-tone-${item.memo_tone} memo-pattern-${item.memo_pattern}` : "life-entry"}
+              data-memo-style={isMemo ? item.memo_style : undefined}
+              data-memo-tone={isMemo ? item.memo_tone : undefined}
+              data-memo-pattern={isMemo ? item.memo_pattern : undefined}
+            >
+              <header><strong>{item.title}</strong><time>{item.occurred_at}</time></header>
+              <p>{item.category}{item.amount !== undefined ? ` · ¥${item.amount.toFixed(2)}` : ""}{item.note ? ` · ${item.note}` : ""}</p>
+              <footer>
+                <span>{item.visible_to_ai ? aiContextAvailable ? "当前人格可读" : "已标记共享 · FastAPI 暂不读取" : "仅自己可见"}</span>
+                <button className="danger-action" type="button" onClick={() => update("life", data.life.filter((row) => row.id !== item.id))}>删除</button>
+              </footer>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
 function CorrespondenceSpace({ data, personaKey, personaName, personas, providers, update, onOpenSettingsTab }: SharedProps & { onOpenSettingsTab: (tab: SettingsTab) => void }) {
   const [tab, setTab] = useState<"mail" | "parlor" | "audit">("mail");
   const shellRef = useRef<HTMLElement>(null);
+  const correspondenceRequestRef = useRef(0);
+  const correspondencePersonaRef = useRef(personaKey);
+  correspondencePersonaRef.current = personaKey;
   const [showContactForm, setShowContactForm] = useState(false);
   const [contactDraft, setContactDraft] = useState({ display_name: "", platform: "", stable_id: "" });
   const [mailDraft, setMailDraft] = useState({ contact_id: "", subject: "", content: "", reply_to: undefined as string | undefined });
@@ -421,13 +965,18 @@ function CorrespondenceSpace({ data, personaKey, personaName, personas, provider
   });
   const standaloneOnly = Boolean(window.AtherloomNative && !getApiBase());
   const [overview, setOverview] = useState<CorrespondenceOverview | null>(null);
+  const [parlorArchives, setParlorArchives] = useState<ParlorArchive[]>([]);
   const [serviceState, setServiceState] = useState<"loading" | "ready" | "standalone" | "error">(standaloneOnly ? "standalone" : "loading");
   const [serviceMessage, setServiceMessage] = useState(standaloneOnly ? "Android 本机模式尚未接入真实往来服务。" : "正在读取往来服务…");
   const [correspondenceBusy, setCorrespondenceBusy] = useState(false);
 
   const refreshOverview = useCallback(async () => {
+    const targetPersonaKey = personaKey;
+    const requestId = ++correspondenceRequestRef.current;
     if (standaloneOnly) {
+      if (requestId !== correspondenceRequestRef.current || targetPersonaKey !== correspondencePersonaRef.current) return;
       setOverview(null);
+      setParlorArchives([]);
       setServiceState("standalone");
       setServiceMessage("Android 本机模式尚未接入真实往来服务。");
       return;
@@ -435,23 +984,33 @@ function CorrespondenceSpace({ data, personaKey, personaName, personas, provider
     setServiceState("loading");
     setServiceMessage("正在读取往来服务…");
     try {
-      const result = await requestJson<CorrespondenceOverview>(`/api/correspondence/${encodeURIComponent(personaKey)}`);
+      const [result, archiveResult] = await Promise.all([
+        requestJson<CorrespondenceOverview>(`/api/correspondence/${encodeURIComponent(personaKey)}`),
+        requestJson<{ items?: ParlorArchive[] }>(`/api/correspondence/parlor/archives/${encodeURIComponent(targetPersonaKey)}`).catch(() => ({ items: [] })),
+      ]);
+      if (requestId !== correspondenceRequestRef.current || targetPersonaKey !== correspondencePersonaRef.current) return;
       setOverview({
         ...result,
         contacts: Array.isArray(result.contacts) ? result.contacts : [],
         mail: (Array.isArray(result.mail) ? result.mail : []).map((item) => ({ ...item, updated_at: item.updated_at || item.delivered_at || item.created_at, reply_to: item.reply_to || undefined })),
         parlors: Array.isArray(result.parlors) ? result.parlors : [],
       });
+      setParlorArchives(Array.isArray(archiveResult.items) ? archiveResult.items : []);
       setServiceState("ready");
       setServiceMessage("往来服务已连接；审批、检查和投递由后端执行。");
     } catch (error) {
+      if (requestId !== correspondenceRequestRef.current || targetPersonaKey !== correspondencePersonaRef.current) return;
       setOverview(null);
+      setParlorArchives([]);
       setServiceState("error");
       setServiceMessage("无法读取往来服务：" + (error instanceof Error ? error.message : "未知错误"));
     }
   }, [personaKey, standaloneOnly]);
 
-  useEffect(() => { void refreshOverview(); }, [refreshOverview]);
+  useEffect(() => {
+    void refreshOverview();
+    return () => { correspondenceRequestRef.current += 1; };
+  }, [refreshOverview]);
   useEffect(() => { shellRef.current?.closest<HTMLElement>(".feature-hub-content")?.scrollTo({ top: 0, behavior: "auto" }); }, [tab]);
 
   const legacyContacts = data.contacts.filter((item) => item.persona_key === personaKey);
@@ -480,9 +1039,12 @@ function CorrespondenceSpace({ data, personaKey, personaName, personas, provider
       allow_web: true,
       allow_memory: true,
     });
-    setParlorStatus("");
     setInvite(null);
   }, [personaKey, savedParlor?.id, savedParlor?.updated_at]);
+
+  useEffect(() => {
+    setParlorStatus("");
+  }, [personaKey]);
 
   const addContact = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -608,6 +1170,31 @@ function CorrespondenceSpace({ data, personaKey, personaName, personas, provider
     }
   };
 
+  const requestArchiveDelete = async (parlorId: string) => {
+    const targetPersona = personas.find((persona) => persona.id === personaKey);
+    const providerId = targetPersona?.config?.provider_id || targetPersona?.provider_id || (personaKey === "__default__" ? providers.find((provider) => provider.enabled !== false)?.id : null);
+    if (!providerId) {
+      setParlorStatus("请先为这个人格选择可用的模型线路，才能由 TA 独立决定是否删除归档。");
+      return;
+    }
+    const reason = window.prompt("为什么希望删除这份会谈归档？所属人格会独立决定是否同意。", "");
+    if (reason === null) return;
+    setCorrespondenceBusy(true);
+    setParlorStatus("已提交删除申请，正在等待所属人格决定…");
+    try {
+      const result = await requestJson<{ decision: string; status: string }>(`/api/correspondence/parlor/archives/${encodeURIComponent(parlorId)}/request-delete`, {
+        method: "POST",
+        body: JSON.stringify({ persona_id: personaKey, provider_id: providerId, reason: reason.slice(0, 1000) }),
+      });
+      setParlorStatus(result.decision === "approve" ? "所属人格同意删除，归档已移入隐藏状态。" : "所属人格不同意删除，这份归档继续保留。");
+      await refreshOverview();
+    } catch (error) {
+      setParlorStatus("删除申请没有完成：" + (error instanceof Error ? error.message : "未知错误"));
+    } finally {
+      setCorrespondenceBusy(false);
+    }
+  };
+
   return <section ref={shellRef} className="correspondence-shell">
     <nav className="correspondence-tabs" aria-label="往来分类">
       <button type="button" className={tab === "mail" ? "active" : ""} aria-current={tab === "mail" ? "page" : undefined} onClick={() => setTab("mail")}>信箱</button>
@@ -663,31 +1250,45 @@ function CorrespondenceSpace({ data, personaKey, personaName, personas, provider
         <p className="form-status" aria-live="polite">{parlorStatus}</p>
       </form>
       {invite ? <div className="invite-ticket"><strong>{invite.code}</strong><small>有效至 {timestampLabel(invite.expires_at)} · 单次使用</small></div> : null}
-      <section className="parlor-archive-empty"><span>PARLOR ARCHIVES</span><h4>往期会谈</h4>{overview?.parlors.length ? overview.parlors.map((item) => <article key={item.id}><strong>{correspondenceStatusLabel(item.status)}</strong><p>{item.summary || item.end_reason || "这场会谈没有可展示的总结。"}</p><time>{timestampLabel(item.ended_at || item.started_at)}</time></article>) : <p>{serviceState === "ready" ? "还没有服务器会谈归档。" : "连接支持会客厅的 FastAPI / Relay 后才能读取真实归档。"}</p>}</section>
+      <section className="parlor-archive-empty"><span>PARLOR ARCHIVES</span><h4>往期会谈</h4>{parlorArchives.filter((item) => item.status !== "deleted").length ? parlorArchives.filter((item) => item.status !== "deleted").map((item) => <article key={item.parlor_id}><strong>{item.topic || "未命名会谈"}</strong><p>{item.summary || "这场会谈没有可展示的总结。"}</p><time>{timestampLabel(item.created_at)}</time><footer><span>{item.deletion_decision === "reject" ? "人格不同意删除 · 继续保留" : "已归档到人格日记与记忆"}</span><button type="button" className="danger-action" disabled={correspondenceBusy} onClick={() => void requestArchiveDelete(item.parlor_id)}>申请删除</button></footer></article>) : <p>{serviceState === "ready" ? "还没有服务器会谈归档。" : "连接支持会客厅的 FastAPI / Relay 后才能读取真实归档。"}</p>}</section>
     </section> : null}
 
     {tab === "audit" ? <section className="correspondence-panel audit-panel"><div className="audit-notice"><strong>用户完整知情</strong><p>信箱不允许隐藏来信、草稿或已发送内容。会客厅若选择“仅看总结”，安全系统仍检查原文，界面只保留双方约定的总结和结束原因。</p></div>{serviceState !== "ready" ? <div className={`correspondence-service-notice state-${serviceState}`} role="status"><div><strong>通信记录未与服务器同步</strong><p>{serviceMessage}{serviceState === "standalone" && audit.length ? " 下方仅为旧版本机记录与本机配置变更。" : ""}</p></div></div> : null}<div className="audit-list">{audit.map((item) => <article key={item.id}><span>{item.text}</span><time>{timestampLabel(item.at)}</time></article>)}{!audit.length ? <p className="correspondence-empty">{serviceState === "ready" ? "还没有通信操作。" : "无法读取服务器通信记录。"}</p> : null}</div></section> : null}
   </section>;
 }
-function WritingSpace({ mode, data, personaKey, personaName, update, aiContextAvailable, prependDream, onGenerateJournal, onGenerateDream }: SharedProps & { mode: "journal" | "board" | "dream" }) {
+function WritingSpace({ mode, data, personaKey, personaName, update, writingLoad, sealedCount, boardSealedCount, writingSyncKind, storageStatus, onRetryWriting, providerId, onGenerateJournal, onGenerateDream }: SharedProps & { mode: "journal" | "board" | "dream" }) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
-  const [visibility, setVisibility] = useState("shared");
-  const [editing, setEditing] = useState<string | null>(null);
+  const [journalSpace, setJournalSpace] = useState<"user" | "shared">("shared");
+  const [visibleToUser, setVisibleToUser] = useState(true);
+  const [visibleToAi, setVisibleToAi] = useState(true);
+  const [dreamKind, setDreamKind] = useState<"dream" | "quarantined">("dream");
+  const [dreamNecropsy, setDreamNecropsy] = useState("");
+  const [editingJournal, setEditingJournal] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyContent, setReplyContent] = useState("");
+  const [operationBusy, setOperationBusy] = useState(false);
+  const [operationStatus, setOperationStatus] = useState("");
   const [journalBusy, setJournalBusy] = useState(false);
   const [journalStatus, setJournalStatus] = useState("");
   const [dreamBusy, setDreamBusy] = useState(false);
   const [dreamStatus, setDreamStatus] = useState("");
   const schedule = data.journalSchedules.find((item) => item.persona_key === personaKey) || null;
   const [scheduleDraft, setScheduleDraft] = useState({ enabled: false, interval_hours: 24, daily_limit: 1, visible_to_user: false, guidance: "" });
-  const rows = mode === "journal" ? data.journals.filter((item) => item.persona_key === personaKey && (item.author !== "ai" || item.visible_to_user))
-    : mode === "board" ? data.board.filter((item) => item.persona_key === personaKey)
-      : data.dreams.filter((item) => item.persona_key === personaKey);
-  const sortedRows = [...rows].sort((left, right) => right.updated_at.localeCompare(left.updated_at));
-  const sealedCount = mode === "journal" ? data.journals.filter((item) => item.persona_key === personaKey && item.author === "ai" && !item.visible_to_user).length : 0;
+  const journals = data.journals.filter((item) => item.persona_key === personaKey && item.visible_to_user).sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+  const boardRows = data.board.filter((item) => item.persona_key === personaKey).sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+  const dreamRows = data.dreams.filter((item) => item.persona_key === personaKey).sort((left, right) => right.updated_at.localeCompare(left.updated_at));
   const audits = data.journalAudit.filter((item) => item.persona_key === personaKey).slice(0, 30);
+  const syncLabel = writingSyncKind === "device" ? "设备本地" : "服务器同步";
+  const remoteUnavailable = writingSyncKind === "server" && writingLoad.status !== "ready";
+  const serverAiJournalBlocked = writingSyncKind === "server";
+  const boardVisibilityLabel = !visibleToAi
+    ? "仅自己可见 · 不唤醒人格"
+    : writingSyncKind === "server"
+      ? "当前人格可见 · 是否唤醒以服务器返回为准"
+      : providerId
+        ? "当前人格可见 · 约 10 分钟后提醒（关闭应用则下次打开补做）"
+        : "当前人格可见 · 尚未设置唤醒线路";
 
   useEffect(() => {
     setScheduleDraft(schedule ? {
@@ -698,37 +1299,46 @@ function WritingSpace({ mode, data, personaKey, personaName, update, aiContextAv
       guidance: schedule.guidance || "",
     } : { enabled: false, interval_hours: 24, daily_limit: 1, visible_to_user: false, guidance: "" });
     setJournalStatus("");
-  }, [personaKey, schedule?.id, schedule?.updated_at]);
+  }, [personaKey, schedule?.id, schedule?.updated_at, writingSyncKind]);
 
   useEffect(() => {
     setTitle("");
     setContent("");
-    setVisibility("shared");
-    setEditing(null);
+    setJournalSpace("shared");
+    setVisibleToUser(true);
+    setVisibleToAi(true);
+    setDreamKind("dream");
+    setDreamNecropsy("");
+    setEditingJournal(null);
     setReplyingTo(null);
     setReplyContent("");
+    setOperationStatus("");
     setDreamStatus("");
   }, [mode, personaKey]);
+
+  const notifyWriting = (kind: "journal" | "board" | "dream") => window.dispatchEvent(new CustomEvent("atherloom:writing-changed", { detail: { kind, persona_key: personaKey } }));
+  const resetJournalEditor = () => {
+    setEditingJournal(null);
+    setTitle("");
+    setContent("");
+    setJournalSpace("shared");
+    setVisibleToUser(true);
+    setVisibleToAi(true);
+  };
 
   const saveSchedule = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const stamp = now();
     const day = localDayKey();
     const entry: JournalSchedule = {
-      id: schedule?.id || id("journal-schedule"),
-      persona_key: personaKey,
-      created_at: schedule?.created_at || stamp,
-      updated_at: stamp,
+      id: schedule?.id || id("journal-schedule"), persona_key: personaKey, created_at: schedule?.created_at || stamp, updated_at: stamp,
       ...scheduleDraft,
-      interval_hours: Math.max(1, Number(scheduleDraft.interval_hours || 24)),
-      daily_limit: Math.max(1, Number(scheduleDraft.daily_limit || 1)),
+      interval_hours: Math.max(1, Number(scheduleDraft.interval_hours || 24)), daily_limit: Math.max(1, Number(scheduleDraft.daily_limit || 1)),
       next_run_at: scheduleDraft.enabled ? afterHours(scheduleDraft.interval_hours) : schedule?.next_run_at || afterHours(scheduleDraft.interval_hours),
-      last_run_at: schedule?.last_run_at,
-      day_key: day,
-      day_count: schedule?.day_key === day ? Number(schedule.day_count || 0) : 0,
+      last_run_at: schedule?.last_run_at, day_key: day, day_count: schedule?.day_key === day ? Number(schedule.day_count || 0) : 0,
     };
     update("journalSchedules", [entry, ...data.journalSchedules.filter((item) => item.persona_key !== personaKey)]);
-    setJournalStatus(scheduleDraft.enabled ? "计划已保存，下次预计 " + timestampLabel(entry.next_run_at) : "定时写作已关闭");
+    setJournalStatus(scheduleDraft.enabled ? "计划已保存在本机，下次预计 " + timestampLabel(entry.next_run_at) : "定时写作已关闭");
   };
 
   const writeNow = async () => {
@@ -737,189 +1347,258 @@ function WritingSpace({ mode, data, personaKey, personaName, update, aiContextAv
     setJournalStatus(personaName + " 正在自己的安静空间里写…");
     try {
       const entry = await onGenerateJournal(personaKey, "manual", scheduleDraft.visible_to_user, scheduleDraft.guidance);
-      setJournalStatus(entry.visible_to_user ? "已写完《" + entry.title + "》" : "已写完一篇密封日记；正文不会显示在你的界面里");
+      setJournalStatus(entry.visible_to_user ? "已写入写作库：《" + entry.title + "》" : "已写入一篇密封日记；正文不会显示在你的界面里");
     } catch (error) {
-      setJournalStatus("写作失败：" + (error instanceof Error ? error.message : "未知错误"));
+      setJournalStatus("写作失败，没有保存日记：" + (error instanceof Error ? error.message : "未知错误"));
     } finally {
       setJournalBusy(false);
     }
   };
 
-  const writeDream = async () => {
+  const saveJournal = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (operationBusy) return;
+    setOperationBusy(true);
+    setOperationStatus(editingJournal ? "正在保存修改…" : "正在保存日记…");
+    try {
+      const draft = { title: title.trim().slice(0, 120), content: content.trim().slice(0, 30000), space: journalSpace, author: "user" as const, visible_to_user: visibleToUser, visible_to_ai: visibleToAi };
+      const saved = editingJournal ? await fastApi.updateJournal(personaKey, editingJournal, draft) : await fastApi.createJournal(personaKey, draft);
+      const entry = journalEntryOf(saved);
+      update("journals", [entry, ...data.journals.filter((item) => item.id !== entry.id)]);
+      resetJournalEditor();
+      setOperationStatus(editingJournal ? "日记修改已同步。" : "日记已保存。");
+      notifyWriting("journal");
+    } catch (error) {
+      setOperationStatus("日记没有保存：" + (error instanceof Error ? error.message : "未知错误"));
+    } finally {
+      setOperationBusy(false);
+    }
+  };
+
+  const editJournal = (entry: JournalEntry) => {
+    if (entry.author === "ai" || entry.parlor_id) return;
+    setEditingJournal(entry.id);
+    setTitle(entry.title);
+    setContent(entry.content);
+    setJournalSpace(entry.space === "shared" ? "shared" : "user");
+    setVisibleToUser(entry.visible_to_user);
+    setVisibleToAi(entry.visible_to_ai);
+    setOperationStatus("正在修改《" + entry.title + "》");
+  };
+
+  const requestJournalArchiveDelete = async (entry: JournalEntry) => {
+    if (!entry.parlor_id) return;
+    if (writingSyncKind === "device") {
+      setOperationStatus("本机迁移的会客厅归档不能单方面删除；请连接原 FastAPI / Relay 后提交给所属人格决定。");
+      return;
+    }
+    const selectedProvider = providerId;
+    if (!selectedProvider) {
+      setOperationStatus("请先为这个人格选择模型线路，才能由 TA 决定是否删除会谈归档。");
+      return;
+    }
+    const reason = window.prompt("为什么希望删除这份会谈归档？所属人格会独立决定是否同意。", "");
+    if (reason === null) return;
+    setOperationBusy(true);
+    setOperationStatus("删除申请已交给所属人格决定…");
+    try {
+      const result = await requestJson<{ decision: string }>(`/api/correspondence/parlor/archives/${encodeURIComponent(entry.parlor_id)}/request-delete`, { method: "POST", body: JSON.stringify({ persona_id: personaKey, provider_id: selectedProvider, reason: reason.slice(0, 1000) }) });
+      setOperationStatus(result.decision === "approve" ? "所属人格同意删除，归档已移入隐藏状态。" : "所属人格不同意删除，归档继续保留。");
+      onRetryWriting();
+    } catch (error) {
+      setOperationStatus("删除申请没有完成：" + (error instanceof Error ? error.message : "未知错误"));
+    } finally {
+      setOperationBusy(false);
+    }
+  };
+
+  const deleteJournal = async (entry: JournalEntry) => {
+    if (entry.parlor_id) {
+      await requestJournalArchiveDelete(entry);
+      return;
+    }
+    if (!window.confirm(`确定删除日记《${entry.title}》吗？`)) return;
+    setOperationBusy(true);
+    try {
+      await fastApi.deleteJournal(personaKey, entry.id);
+      update("journals", data.journals.filter((item) => item.id !== entry.id));
+      setOperationStatus("日记已删除。");
+      notifyWriting("journal");
+    } catch (error) {
+      setOperationStatus("日记没有删除：" + (error instanceof Error ? error.message : "未知错误"));
+    } finally {
+      setOperationBusy(false);
+    }
+  };
+
+  const saveBoard = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!content.trim() || operationBusy) return;
+    setOperationBusy(true);
+    setOperationStatus("正在贴出留言…");
+    try {
+      const saved = await fastApi.createBoardMessage(personaKey, {
+        content: content.trim().slice(0, 5000), author: "user", visible_to_user: true, visible_to_ai: visibleToAi,
+        wake_after_minutes: visibleToAi ? 10 : undefined, wake_provider_id: visibleToAi ? providerId : null,
+      });
+      const entry = boardEntryOf(saved);
+      update("board", [entry, ...data.board.filter((item) => item.id !== entry.id)]);
+      setContent("");
+      setOperationStatus(!visibleToAi ? "仅自己可见的留言已贴出。" : entry.wake_due_at ? `留言已贴出，将在 ${timestampLabel(entry.wake_due_at)} 提醒当前人格。` : writingSyncKind === "device" ? providerId ? "留言已贴出，本机留言唤醒队列已接收。" : "留言已贴出；当前人格尚未设置唤醒线路。" : "留言已同步；服务器没有返回唤醒安排。");
+      notifyWriting("board");
+    } catch (error) {
+      setOperationStatus("留言没有贴出：" + (error instanceof Error ? error.message : "未知错误"));
+    } finally {
+      setOperationBusy(false);
+    }
+  };
+
+  const saveReply = async (event: FormEvent<HTMLFormElement>, parent: BoardEntry) => {
+    event.preventDefault();
+    if (!replyContent.trim() || operationBusy) return;
+    setOperationBusy(true);
+    try {
+      const saved = await fastApi.createBoardMessage(personaKey, {
+        content: replyContent.trim().slice(0, 5000), author: "user", visible_to_user: true, visible_to_ai: parent.visible_to_ai,
+        reply_to: parent.id, wake_after_minutes: parent.visible_to_ai ? 10 : undefined, wake_provider_id: parent.visible_to_ai ? providerId : null,
+      });
+      const entry = boardEntryOf(saved);
+      update("board", [entry, ...data.board.filter((item) => item.id !== entry.id)]);
+      setReplyContent("");
+      setReplyingTo(null);
+      setOperationStatus(!parent.visible_to_ai ? "回复已贴出。" : entry.wake_due_at ? `回复已贴出，将在 ${timestampLabel(entry.wake_due_at)} 提醒当前人格。` : writingSyncKind === "device" ? providerId ? "回复已贴出，本机留言唤醒队列已接收。" : "回复已贴出；当前人格尚未设置唤醒线路。" : "回复已同步；服务器没有返回唤醒安排。");
+      notifyWriting("board");
+    } catch (error) {
+      setOperationStatus("回复没有贴出：" + (error instanceof Error ? error.message : "未知错误"));
+    } finally {
+      setOperationBusy(false);
+    }
+  };
+
+  const deleteBoard = async (entry: BoardEntry) => {
+    if (!window.confirm("确定只删除这张留言吗？已有回复不会被连带删除。")) return;
+    setOperationBusy(true);
+    try {
+      await fastApi.deleteBoardMessage(personaKey, entry.id);
+      update("board", data.board.filter((item) => item.id !== entry.id));
+      setOperationStatus("这张留言已删除；它下面已有的回复仍然保留。");
+      notifyWriting("board");
+    } catch (error) {
+      setOperationStatus("留言没有删除：" + (error instanceof Error ? error.message : "未知错误"));
+    } finally {
+      setOperationBusy(false);
+    }
+  };
+
+  const generateDreamDraft = async () => {
     if (dreamBusy) return;
     setDreamBusy(true);
     setDreamStatus(personaName + " 正在从近期对话里长出一场梦…");
     try {
-      const draft = await onGenerateDream(personaKey, content.trim());
-      const stamp = now();
-      const entry: DreamEntry = {
-        id: id("ai-dream"),
-        persona_key: personaKey,
-        created_at: stamp,
-        updated_at: stamp,
-        title: draft.title.trim() || "没有名字的梦",
-        content: draft.content.trim(),
-        owner: "ai",
-        isolated: false,
-        claimed: true,
-      };
-      prependDream(entry);
-      setDreamStatus("已收进梦库：《" + entry.title + "》");
+      const draft = await onGenerateDream(personaKey);
+      setTitle(draft.title.trim().slice(0, 120) || "没有名字的梦");
+      setContent(draft.content.trim().slice(0, 30000));
+      setDreamKind("dream");
+      setDreamStatus("梦境草稿已经填好。你可以修改；点击“保存梦境”后才会入库。");
     } catch (error) {
-      setDreamStatus("做梦失败：" + (error instanceof Error ? error.message : "未知错误"));
+      setDreamStatus("做梦失败，没有保存任何内容：" + (error instanceof Error ? error.message : "未知错误"));
     } finally {
       setDreamBusy(false);
     }
   };
 
-  const save = (event: FormEvent<HTMLFormElement>) => {
+  const saveDream = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const stamp = now();
-    if (mode === "journal") {
-      const existing = data.journals.find((item) => item.id === editing);
-      const entry: JournalEntry = {
-        id: editing || id("journal"),
-        persona_key: personaKey,
-        created_at: existing?.created_at || stamp,
-        updated_at: stamp,
-        title: title.trim() || "无题日记",
-        content: content.trim(),
-        space: visibility === "private" ? "private" : "shared",
-        author: "user",
-        visible_to_user: true,
-        visible_to_ai: visibility !== "private",
-      };
-      update("journals", [entry, ...data.journals.filter((item) => item.id !== editing)]);
-    } else if (mode === "board") {
-      const existing = data.board.find((item) => item.id === editing);
-      const entry: BoardEntry = {
-        id: editing || id("board"),
-        persona_key: personaKey,
-        created_at: existing?.created_at || stamp,
-        updated_at: stamp,
-        content: content.trim(),
-        author: "user",
-        visible_to_user: true,
-        visible_to_ai: visibility !== "private",
-        reply_to: existing?.reply_to,
-      };
-      update("board", [entry, ...data.board.filter((item) => item.id !== editing)]);
-    } else {
-      const existing = data.dreams.find((item) => item.id === editing);
-      const entry: DreamEntry = {
-        id: editing || id("dream"),
-        persona_key: personaKey,
-        created_at: existing?.created_at || stamp,
-        updated_at: stamp,
-        title: title.trim() || "没有名字的梦",
-        content: content.trim(),
-        owner: "user",
-        isolated: visibility === "private",
-        claimed: visibility === "claimed",
-      };
-      update("dreams", [entry, ...data.dreams.filter((item) => item.id !== editing)]);
+    if (operationBusy) return;
+    setOperationBusy(true);
+    setDreamStatus("正在保存梦境…");
+    try {
+      const saved = await fastApi.createDream(personaKey, {
+        title: title.trim().slice(0, 120), raw_text: content.trim().slice(0, 30000), kind: dreamKind,
+        summary: content.trim().replace(/\s+/g, " ").slice(0, 180), necropsy: dreamNecropsy.trim().slice(0, 2000),
+      });
+      const entry = dreamEntryOf(saved);
+      update("dreams", [entry, ...data.dreams.filter((item) => item.id !== entry.id)]);
+      setTitle(""); setContent(""); setDreamNecropsy(""); setDreamKind("dream");
+      setDreamStatus(dreamKind === "quarantined" ? "梦境已保存到隔离区，尚未认领。" : "梦境已保存并认领。");
+      notifyWriting("dream");
+    } catch (error) {
+      setDreamStatus("梦境没有保存：" + (error instanceof Error ? error.message : "未知错误"));
+    } finally {
+      setOperationBusy(false);
     }
-    setTitle("");
-    setContent("");
-    setEditing(null);
   };
 
-  const saveReply = (event: FormEvent<HTMLFormElement>, parent: BoardEntry) => {
-    event.preventDefault();
-    if (!replyContent.trim()) return;
-    const stamp = now();
-    const reply: BoardEntry = {
-      id: id("board-reply"),
-      persona_key: personaKey,
-      created_at: stamp,
-      updated_at: stamp,
-      content: replyContent.trim(),
-      author: "user",
-      visible_to_user: true,
-      visible_to_ai: parent.visible_to_ai,
-      reply_to: parent.id,
-    };
-    update("board", [reply, ...data.board]);
-    setReplyContent("");
-    setReplyingTo(null);
-  };
-
-  const remove = (entryId: string) => {
-    if (mode === "journal") update("journals", data.journals.filter((item) => item.id !== entryId));
-    else if (mode === "board") update("board", data.board.filter((item) => item.id !== entryId && item.reply_to !== entryId));
-    else update("dreams", data.dreams.filter((item) => item.id !== entryId));
-  };
-
-  const edit = (entry: JournalEntry | BoardEntry | DreamEntry) => {
-    if (mode === "journal" && (entry as JournalEntry).author === "ai") return;
-    if (mode === "dream" && (entry as DreamEntry).owner === "ai") return;
-    setEditing(entry.id);
-    setTitle("title" in entry ? entry.title : "");
-    setContent(entry.content);
-    if (mode === "journal") setVisibility((entry as JournalEntry).space);
-    else if (mode === "board") setVisibility((entry as BoardEntry).visible_to_ai ? "shared" : "private");
-    else setVisibility((entry as DreamEntry).isolated ? "private" : (entry as DreamEntry).claimed ? "claimed" : "shared");
-  };
-
-  const resetEditor = () => {
-    setEditing(null);
-    setTitle("");
-    setContent("");
-    setVisibility("shared");
+  const claimDream = async (entry: DreamEntry) => {
+    const note = window.prompt("写一句认领说明；留空时会使用梦境原文。", entry.claim_note || "");
+    if (note === null) return;
+    setOperationBusy(true);
+    setDreamStatus("正在认领这场梦…");
+    try {
+      const saved = dreamEntryOf(await fastApi.claimDream(personaKey, entry.id, note.slice(0, 10000)));
+      update("dreams", data.dreams.map((item) => item.id === saved.id ? saved : item));
+      setDreamStatus("这场梦已经认领；认领状态与备注已保存。");
+      notifyWriting("dream");
+    } catch (error) {
+      setDreamStatus("梦境没有认领：" + (error instanceof Error ? error.message : "未知错误"));
+    } finally {
+      setOperationBusy(false);
+    }
   };
 
   return <section className={"space-section writing-space writing-" + mode}>
-    {mode === "dream" ? <div className="dream-space-heading"><div><h4>梦库</h4><p>从近期真实对话碎片长出一场明确属于梦境的叙事。</p></div><button type="button" className="primary-button" disabled={dreamBusy} onClick={() => void writeDream()}>{dreamBusy ? "正在做梦…" : "让 TA 做梦"}</button></div> : null}
+    <div className={`writing-sync-state state-${writingLoad.status}`} role="status"><div><strong>{syncLabel}</strong><p>{writingLoad.message || "准备读取写作库。"}</p>{storageStatus ? <small>{storageStatus}</small> : null}</div>{writingLoad.status === "error" ? <button type="button" className="secondary-button" onClick={onRetryWriting}>重新读取</button> : null}</div>
 
-    {mode === "journal" ? <form className="writing-paper-form journal-paper-form" onSubmit={save}>
-      <label>标题<input required value={title} onChange={(event) => setTitle(event.target.value)} /></label>
-      <label>日记空间<select value={visibility} onChange={(event) => setVisibility(event.target.value)}><option value="private">我的私人日记</option><option value="shared">{aiContextAvailable ? "与当前人格共享" : "标记共享（FastAPI 暂不读取）"}</option></select><small>AI 私人日记只能由 AI 自己写；密封内容不会显示正文。{aiContextAvailable ? "" : " 当前 FastAPI 聊天尚未注入本机共享空间。"}</small></label>
-      <label>正文<textarea required rows={11} value={content} onChange={(event) => setContent(event.target.value)} /></label>
-      <div className="writing-form-footer"><label className="check-row"><input type="checkbox" checked={visibility === "shared"} onChange={(event) => setVisibility(event.target.checked ? "shared" : "private")} /><span>{aiContextAvailable ? "给当前人格看" : "标记共享（FastAPI 暂不读取）"}</span></label><div>{editing ? <button type="button" className="secondary-button" onClick={resetEditor}>取消修改</button> : null}<button className="primary-button">{editing ? "保存修改" : "保存日记"}</button></div></div>
+    {remoteUnavailable ? <p className="space-empty">服务器写作库尚未就绪；为避免把设备缓存误当成服务器内容，读取成功前不会显示或修改记录。</p> : <>
+
+    {mode === "journal" ? <form className="writing-paper-form journal-paper-form" onSubmit={(event) => void saveJournal(event)}>
+      <label>标题<input required maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} /></label>
+      <label>日记空间<select value={journalSpace} onChange={(event) => setJournalSpace(event.target.value as "user" | "shared")}><option value="user">用户日记</option><option value="shared">共享日记</option></select><small>空间名称和可见权限分别保存，互不替代。</small></label>
+      <label>正文<textarea required maxLength={30000} rows={11} value={content} onChange={(event) => setContent(event.target.value)} /></label>
+      <div className="writing-visibility-grid"><label className="check-row"><input type="checkbox" checked={visibleToUser} onChange={(event) => setVisibleToUser(event.target.checked)} /><span>在我的界面显示</span></label><label className="check-row"><input type="checkbox" checked={visibleToAi} onChange={(event) => setVisibleToAi(event.target.checked)} /><span>允许当前人格读取</span></label></div>
+      <div className="writing-form-footer"><p className="form-status" aria-live="polite">{operationStatus}</p><div>{editingJournal ? <button type="button" className="secondary-button" onClick={resetJournalEditor}>取消修改</button> : null}<button className="primary-button" disabled={operationBusy}>{editingJournal ? "保存修改" : "保存日记"}</button></div></div>
     </form> : null}
 
-    {mode === "board" ? <form className="board-composer" onSubmit={save}>
-      <textarea required rows={6} value={content} onChange={(event) => setContent(event.target.value)} placeholder="留一句想让对方下次看见的话……" aria-label="留言正文" />
-      <div><label className="check-row"><input type="checkbox" checked={visibility === "shared"} onChange={(event) => setVisibility(event.target.checked ? "shared" : "private")} /><span>{aiContextAvailable ? "给当前人格看" : "标记共享（FastAPI 暂不读取）"}</span></label><span>{editing ? <button type="button" className="secondary-button" onClick={resetEditor}>取消修改</button> : null}<button className="primary-button">{editing ? "保存修改" : "贴到留言板"}</button></span></div>
+    {mode === "board" ? <form className="board-composer" onSubmit={(event) => void saveBoard(event)}>
+      <textarea required maxLength={5000} rows={6} value={content} onChange={(event) => setContent(event.target.value)} placeholder="留一句想让对方看见的话……" aria-label="留言正文" />
+      <div><label className="check-row"><input type="checkbox" checked={visibleToAi} onChange={(event) => setVisibleToAi(event.target.checked)} /><span>{boardVisibilityLabel}</span></label><span><button className="primary-button" disabled={operationBusy}>{operationBusy ? "正在贴出…" : "贴到留言板"}</button></span></div>
+      <p className="form-status" aria-live="polite">{operationStatus}</p>
     </form> : null}
+    {mode === "board" && boardSealedCount > 0 ? <p className="writing-sealed-board-count" role="status">有 {boardSealedCount} 张密封留言；你的界面只显示数量，其中只有勾选给人格看的内容会作为禁止复述或暗示的密封背景。</p> : null}
 
-    {mode === "dream" ? <form className="writing-paper-form dream-paper-form" onSubmit={save}>
-      <label>梦的名字<input required value={title} onChange={(event) => setTitle(event.target.value)} placeholder="没有名字的梦" /></label>
-      <label>梦境正文<textarea required rows={11} value={content} onChange={(event) => setContent(event.target.value)} /></label>
-      <label>归档方式<select value={visibility} onChange={(event) => setVisibility(event.target.value)}><option value="shared">收进梦库</option><option value="private">先放进隔离区</option><option value="claimed">标记为已认领梦境</option></select></label>
-      <div className="writing-form-footer"><p className="form-status" aria-live="polite">{dreamStatus}</p><div>{editing ? <button type="button" className="secondary-button" onClick={resetEditor}>取消修改</button> : null}<button className="primary-button">{editing ? "保存修改" : "保存梦境"}</button></div></div>
-    </form> : null}
+    {mode === "dream" ? <><div className="dream-space-heading"><div><h4>梦库</h4><p>生成只会填入下方草稿；你确认保存后才会入库。</p></div><button type="button" className="primary-button" disabled={dreamBusy} onClick={() => void generateDreamDraft()}>{dreamBusy ? "正在做梦…" : "让 TA 做梦"}</button></div><form className="writing-paper-form dream-paper-form" onSubmit={(event) => void saveDream(event)}>
+      <label>梦的名字<input required maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="没有名字的梦" /></label>
+      <label>梦境正文<textarea required maxLength={30000} rows={11} value={content} onChange={(event) => setContent(event.target.value)} /></label>
+      <label>归档方式<select value={dreamKind} onChange={(event) => setDreamKind(event.target.value as "dream" | "quarantined")}><option value="dream">梦境 · 保存时直接认领</option><option value="quarantined">隔离梦境 · 稍后认领</option></select></label>
+      <label>醒后剖析（可选）<textarea maxLength={2000} rows={4} value={dreamNecropsy} onChange={(event) => setDreamNecropsy(event.target.value)} placeholder="写下意象、触感或醒来后的理解。" /></label>
+      <div className="writing-form-footer"><p className="form-status" aria-live="polite">{dreamStatus}</p><div><button className="primary-button" disabled={operationBusy}>保存梦境</button></div></div>
+    </form></> : null}
 
     {mode === "journal" ? <section className="ai-journal-ledger" aria-labelledby="ai-journal-title">
-      <header><div><span>SEALED LEDGER</span><h4 id="ai-journal-title">{personaName} 的私人写作</h4><p>应用打开时到点执行；彻底关闭期间错过的计划会在下次打开后补写并留下审计。</p></div><div className="journal-seal" title="密封日记数量"><strong>{sealedCount}</strong><small>篇密封</small></div></header>
+      <header><div><span>SEALED LEDGER</span><h4 id="ai-journal-title">{personaName} 的私人写作</h4><p>定时计划留在本机；生成完成后必须真正写入{writingSyncKind === "device" ? "设备写作库" : "服务器"}，才会记为成功。</p></div><div className="journal-seal" title="密封日记数量"><strong>{sealedCount}</strong><small>篇密封</small></div></header>
       <form className="journal-engine-form" onSubmit={saveSchedule}>
         <label className="check-row span-all"><input type="checkbox" checked={scheduleDraft.enabled} onChange={(event) => setScheduleDraft({ ...scheduleDraft, enabled: event.target.checked })} /><span>启用定时写日记</span></label>
         <label>写作间隔<select value={scheduleDraft.interval_hours} onChange={(event) => setScheduleDraft({ ...scheduleDraft, interval_hours: Number(event.target.value) })}><option value="1">每 1 小时</option><option value="3">每 3 小时</option><option value="6">每 6 小时</option><option value="12">每 12 小时</option><option value="24">每 24 小时</option></select></label>
         <label>每天最多<select value={scheduleDraft.daily_limit} onChange={(event) => setScheduleDraft({ ...scheduleDraft, daily_limit: Number(event.target.value) })}>{[1, 2, 3, 4, 5, 6].map((value) => <option value={value} key={value}>{value} 篇</option>)}</select></label>
         <label>你能否阅读<select value={scheduleDraft.visible_to_user ? "visible" : "sealed"} onChange={(event) => setScheduleDraft({ ...scheduleDraft, visible_to_user: event.target.value === "visible" })}><option value="sealed">密封，只显示数量</option><option value="visible">允许我阅读正文</option></select></label>
-        <label className="span-all">可选写作线索<textarea rows={3} value={scheduleDraft.guidance} onChange={(event) => setScheduleDraft({ ...scheduleDraft, guidance: event.target.value })} placeholder="留空则由 TA 自己决定。" /></label>
-        <div className="journal-engine-actions span-all"><button type="submit" className="secondary-button">保存写作计划</button><button type="button" className="primary-button" disabled={journalBusy} onClick={() => void writeNow()}>{journalBusy ? "正在写…" : "让 TA 现在写一篇"}</button></div>
-        <p className="form-status span-all" aria-live="polite">{journalStatus || (schedule?.enabled ? "下次预计 " + timestampLabel(schedule.next_run_at) : "定时写作尚未启用")}</p>
+        <label className="span-all">可选写作线索<textarea maxLength={3000} rows={3} value={scheduleDraft.guidance} onChange={(event) => setScheduleDraft({ ...scheduleDraft, guidance: event.target.value })} placeholder="留空则由 TA 自己决定。" /></label>
+        {writingSyncKind === "server" ? <p className="form-status span-all">旧 FastAPI 没有无副作用的日记草稿模式。为避免模型先调用写入工具、界面又保存一次，服务器模式暂不执行 AI 日记计划或立即生成；手写日记仍可正常保存。</p> : null}
+        <div className="journal-engine-actions span-all"><button type="submit" className="secondary-button" disabled={serverAiJournalBlocked}>保存写作计划</button><button type="button" className="primary-button" disabled={journalBusy || serverAiJournalBlocked} onClick={() => void writeNow()}>{journalBusy ? "正在写…" : "让 TA 现在写一篇"}</button></div>
+        <p className="form-status span-all" aria-live="polite">{serverAiJournalBlocked ? "服务器模式的 AI 日记生成已暂停；设备本地模式可使用，手写日记不受影响。" : journalStatus || (schedule?.enabled ? "下次预计 " + timestampLabel(schedule.next_run_at) : "定时写作尚未启用")}</p>
       </form>
       <details className="journal-audit"><summary>运行审计 · 最近 {audits.length} 条</summary><div>{audits.map((entry) => <article key={entry.id} data-status={entry.status}><span>{entry.status === "success" ? "完成" : entry.status === "failed" ? "失败" : entry.status === "skipped" ? "跳过" : "进行中"}</span><p>{entry.detail}</p><time>{timestampLabel(entry.updated_at)}</time></article>)}{!audits.length ? <p>还没有写作运行记录。</p> : null}</div></details>
     </section> : null}
 
-    <div className="space-card-list writing-card-list">{sortedRows.map((entry) => {
-      const journal = mode === "journal" ? entry as JournalEntry : null;
-      const board = mode === "board" ? entry as BoardEntry : null;
-      const dream = mode === "dream" ? entry as DreamEntry : null;
-      return <article className={(journal?.author === "ai" ? "ai-authored-entry " : "") + (board ? "board-note" : dream ? "dream-note" : "journal-note")} key={entry.id}>
-        <header><strong>{journal ? journal.title : board ? (board.reply_to ? "回复" : board.author === "ai" ? personaName + " 的留言" : "我的留言") : dream?.title}</strong>{board ? <small>{personaName} 的留言板</small> : null}</header>
-        <p>{entry.content}</p>
-        <footer>
-          {board ? <><button type="button" onClick={() => { setReplyingTo(board.id); setReplyContent(""); }}>回复</button><time>{timestampLabel(board.updated_at)}</time><span>{board.visible_to_ai ? aiContextAvailable ? "当前人格可读" : "已标记共享 · FastAPI 暂不读取" : "仅自己可见"}</span></> : <><time>{timestampLabel(entry.updated_at)}</time><span>{journal?.author === "ai" ? personaName + " 写作 · 已允许阅读" : dream ? dream.owner === "ai" ? personaName + " 的梦" : dream.isolated ? "隔离区" : dream.claimed ? aiContextAvailable ? "已认领 · 当前人格可读" : "已认领 · FastAPI 暂不读取" : "梦库" : journal?.visible_to_ai ? aiContextAvailable ? "当前人格可读" : "已标记共享 · FastAPI 暂不读取" : "仅自己可见"}</span></>}
-          {!(journal?.author === "ai") && !(dream?.owner === "ai") ? <button type="button" onClick={() => edit(entry)}>修改</button> : null}
-          <button type="button" className="danger-action" onClick={() => remove(entry.id)}>移除</button>
-        </footer>
-        {board && replyingTo === board.id ? <form className="board-inline-reply" onSubmit={(event) => saveReply(event, board)}><textarea required rows={3} aria-label="回复内容" value={replyContent} onChange={(event) => setReplyContent(event.target.value)} /><div><button type="button" className="secondary-button" onClick={() => setReplyingTo(null)}>取消</button><button className="primary-button">贴出回复</button></div></form> : null}
-      </article>;
-    })}</div>
-    {!sortedRows.length ? <p className="space-empty">{mode === "journal" ? "还没有日记。" : mode === "board" ? "留言板还是空的。" : "梦库还是空的。"}</p> : null}
+    {mode === "journal" ? <div className="space-card-list writing-card-list">{journals.map((entry) => <article className={(entry.author === "ai" ? "ai-authored-entry " : "") + "journal-note"} key={entry.id}><header><strong>{entry.title}</strong>{entry.parlor_id ? <small>会客厅自动归档</small> : null}</header><p>{entry.content}</p><footer><time>{timestampLabel(entry.updated_at)}</time><span>{entry.author === "ai" ? `${personaName} 写作` : entry.visible_to_ai ? "当前人格可读" : "不提供给人格"} · {entry.visible_to_user ? "我可读" : "对我密封"}</span>{entry.author !== "ai" && !entry.parlor_id ? <button type="button" onClick={() => editJournal(entry)}>修改</button> : null}<button type="button" className="danger-action" disabled={operationBusy} onClick={() => void deleteJournal(entry)}>{entry.parlor_id ? writingSyncKind === "device" ? "连接后申请" : "申请删除" : "删除"}</button></footer></article>)}</div> : null}
+
+    {mode === "board" ? <div className="space-card-list writing-card-list">{boardRows.map((entry) => { const aiAuthored = entry.author_role === "assistant" || entry.author === "ai"; return <article className="board-note" key={entry.id}><header><strong>{entry.reply_to ? "回复" : aiAuthored ? personaName + " 的留言" : "我的留言"}</strong><small>{personaName} 的留言板</small></header><p>{entry.content}</p><footer><button type="button" onClick={() => { setReplyingTo(entry.id); setReplyContent(""); }}>回复</button><time>{timestampLabel(entry.updated_at)}</time><span>{entry.visible_to_ai ? entry.wake_due_at ? "已安排 " + timestampLabel(entry.wake_due_at) + " 提醒" : `${syncLabel} · 当前人格可读` : "仅自己可见"}</span><button type="button" className="danger-action" disabled={operationBusy} onClick={() => void deleteBoard(entry)}>删除这张</button></footer>{replyingTo === entry.id ? <form className="board-inline-reply" onSubmit={(event) => void saveReply(event, entry)}><textarea required maxLength={5000} rows={3} aria-label="回复内容" value={replyContent} onChange={(event) => setReplyContent(event.target.value)} /><div><button type="button" className="secondary-button" onClick={() => setReplyingTo(null)}>取消</button><button className="primary-button" disabled={operationBusy}>贴出回复</button></div></form> : null}</article>; })}</div> : null}
+
+    {mode === "dream" ? <div className="space-card-list writing-card-list">{dreamRows.map((entry) => <article className="dream-note" key={entry.id}><header><strong>{entry.title}</strong><small>{entry.kind === "quarantined" ? "隔离梦境" : "梦境"}</small></header><p>{entry.raw_text}</p>{entry.summary ? <blockquote><strong>梦的摘要</strong>{entry.summary}</blockquote> : null}{entry.necropsy ? <blockquote><strong>醒后剖析</strong>{entry.necropsy}</blockquote> : null}<footer><time>{timestampLabel(entry.updated_at)}</time><span>{entry.claimed ? "已认领" : "尚未认领 · 保留在隔离区"}</span>{entry.kind === "quarantined" && !entry.claimed ? <button type="button" className="primary-button" disabled={operationBusy} onClick={() => void claimDream(entry)}>认领这场梦</button> : null}</footer></article>)}</div> : null}
+
+    {mode === "journal" && !journals.length ? <p className="space-empty">还没有可见日记。</p> : null}
+    {mode === "board" && !boardRows.length ? <p className="space-empty">留言板还是空的。</p> : null}
+    {mode === "dream" && !dreamRows.length ? <p className="space-empty">梦库还是空的。</p> : null}
+    </>}
   </section>;
 }
 async function readBookFile(file: File) {

@@ -1,4 +1,4 @@
-const CACHE = "atherloom-react-v0.2.2";
+const CACHE = "atherloom-react-v0.2.3";
 const SHELL = ["./", "./manifest.webmanifest", "./app-icon.svg", "./app-icon-dark.svg", "./app-icon-monochrome.svg"];
 
 self.addEventListener("install", (event) => {

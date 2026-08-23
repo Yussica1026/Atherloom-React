@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
-import type { AppSettings, Persona, PersonaConfig, PersonaDraft, Provider } from "../../domain/types";
+import type { AppSettings, Persona, PersonaConfig, PersonaDraft, Provider, SubagentConfig } from "../../domain/types";
 
 interface PersonaSettingsProps {
   personas: Persona[];
@@ -11,7 +11,7 @@ interface PersonaSettingsProps {
   onDelete: (id: string) => Promise<void>;
 }
 
-type PersonaPane = "basic" | "prompt" | "memory" | "phrases" | "request" | "regex" | "tools" | "mcp";
+type PersonaPane = "basic" | "prompt" | "memory" | "phrases" | "request" | "regex" | "tools" | "subagents" | "mcp";
 
 interface PersonaFormState {
   name: string;
@@ -31,6 +31,7 @@ interface PersonaFormState {
   toolTts: boolean;
   toolAskUser: boolean;
   toolCalculator: boolean;
+  subagents: SubagentConfig[];
   mcpServers: string;
 }
 
@@ -65,8 +66,17 @@ const panes: Array<{ value: PersonaPane; label: string }> = [
   { value: "request", label: "自定义请求" },
   { value: "regex", label: "正则替换" },
   { value: "tools", label: "本地工具" },
+  { value: "subagents", label: "子代理" },
   { value: "mcp", label: "MCP" },
 ];
+
+function subagentId() {
+  return `subagent-${crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+}
+
+function emptySubagent(): SubagentConfig {
+  return { id: subagentId(), name: "", role: "", instructions: "", provider_id: "", enabled: true };
+}
 
 function emptyForm(): PersonaFormState {
   return {
@@ -87,6 +97,7 @@ function emptyForm(): PersonaFormState {
     toolTts: false,
     toolAskUser: true,
     toolCalculator: true,
+    subagents: [],
     mcpServers: "",
   };
 }
@@ -113,6 +124,14 @@ function formFromPersona(persona: Persona): PersonaFormState {
     toolTts: Boolean(tools.tts),
     toolAskUser: tools.ask_user !== false,
     toolCalculator: tools.calculator !== false,
+    subagents: (Array.isArray(config.subagents) ? config.subagents : []).slice(0, 8).map((agent) => ({
+      id: String(agent.id || subagentId()).slice(0, 160),
+      name: String(agent.name || "").slice(0, 40),
+      role: String(agent.role || "").slice(0, 120),
+      instructions: String(agent.instructions || "").slice(0, 8_000),
+      provider_id: String(agent.provider_id || "").slice(0, 240),
+      enabled: agent.enabled !== false,
+    })),
     mcpServers: (config.mcp_servers || []).join("\n"),
   };
 }
@@ -126,6 +145,13 @@ function parseObject(value: string, label: string) {
 function formToDraft(form: PersonaFormState): PersonaDraft {
   const regexRules = JSON.parse(form.regexRules || "[]") as unknown;
   if (!Array.isArray(regexRules)) throw new Error("正则规则必须是 JSON 数组");
+  const subagents = form.subagents.slice(0, 8).map((agent, index) => {
+    const name = agent.name.trim().slice(0, 40);
+    const role = agent.role.trim().slice(0, 120);
+    const instructions = agent.instructions.trim().slice(0, 8_000);
+    if (!name || !role || !instructions) throw new Error(`请补全第 ${index + 1} 个子代理的名称、专长和工作指令`);
+    return { id: String(agent.id || subagentId()).slice(0, 160), name, role, instructions, provider_id: String(agent.provider_id || "").slice(0, 240), enabled: agent.enabled !== false };
+  });
   const config: PersonaConfig = {
     provider_id: form.providerId,
     startup_chat: form.startupChat,
@@ -145,6 +171,7 @@ function formToDraft(form: PersonaFormState): PersonaDraft {
       ask_user: form.toolAskUser,
       calculator: form.toolCalculator,
     },
+    subagents,
     mcp_servers: form.mcpServers.split(/\r?\n/).map((item) => item.trim()).filter(Boolean),
   };
   return { name: form.name.trim(), prompt: form.prompt, config };
@@ -241,6 +268,18 @@ export function PersonaSettings({ personas, providers, settings, onSettingsChang
     });
   };
 
+  const updateSubagent = (agentId: string, patch: Partial<SubagentConfig>) => {
+    setForm((current) => ({ ...current, subagents: current.subagents.map((agent) => agent.id === agentId ? { ...agent, ...patch } : agent) }));
+  };
+
+  const addSubagent = () => {
+    if (form.subagents.length >= 8) {
+      setStatus("每个人格最多配置 8 个子代理");
+      return;
+    }
+    setForm((current) => ({ ...current, subagents: [...current.subagents, emptySubagent()] }));
+  };
+
   return (
     <section className="settings-section settings-feature" aria-labelledby="personas-title">
       <div className="section-heading">
@@ -298,6 +337,21 @@ export function PersonaSettings({ personas, providers, settings, onSettingsChang
             ["toolTime", "时间信息"], ["toolClipboard", "剪贴板（需系统授权）"], ["toolTts", "文字转语音"], ["toolAskUser", "询问用户"], ["toolCalculator", "计算器"],
           ] as Array<[keyof PersonaFormState, string]>).map(([key, label]) => <label className="check-row tool-choice" key={key}><input type="checkbox" checked={Boolean(form[key])} onChange={(event) => update(key, event.target.checked as never)} /><span>{label}</span></label>)}
         </div></div> : null}
+
+        {activePane === "subagents" ? <div className="persona-pane subagent-pane span-all">
+          <div className="subagent-intro"><div><strong>给当前人格安排专门的协作者</strong><p>主人格只会在你明确提到“子代理、委托、交给谁分析”等意图时调用。子代理只收到本轮任务，不读取整段聊天、不能再调用工具或创建下级代理。</p></div><button type="button" className="secondary-button" onClick={addSubagent}>添加子代理</button></div>
+          <div className="subagent-config-list">
+            {form.subagents.map((agent, index) => <article className="subagent-config-card" key={agent.id}>
+              <header><span>{String(index + 1).padStart(2, "0")}</span><label className="check-row"><input type="checkbox" checked={agent.enabled} onChange={(event) => updateSubagent(agent.id, { enabled: event.target.checked })} /><strong>{agent.enabled ? "允许委托" : "暂不调用"}</strong></label><button type="button" className="danger-action" onClick={() => setForm((current) => ({ ...current, subagents: current.subagents.filter((item) => item.id !== agent.id) }))}>移除</button></header>
+              <label>名称<input maxLength={40} value={agent.name} onChange={(event) => updateSubagent(agent.id, { name: event.target.value })} placeholder="例如：资料核对员" /></label>
+              <label>专长<input maxLength={120} value={agent.role} onChange={(event) => updateSubagent(agent.id, { role: event.target.value })} placeholder="例如：整理事实、核对冲突，不做最终决定" /></label>
+              <label>模型线路<select value={agent.provider_id || ""} onChange={(event) => updateSubagent(agent.id, { provider_id: event.target.value })}><option value="">跟随主人格当前线路</option>{providers.filter((provider) => provider.enabled !== false).map((provider) => <option value={provider.id} key={provider.id}>{provider.name} · {provider.model}</option>)}</select></label>
+              <label className="span-all">工作指令<textarea rows={5} maxLength={8000} value={agent.instructions} onChange={(event) => updateSubagent(agent.id, { instructions: event.target.value })} placeholder="写清输入、工作方法、应返回什么，以及不得做什么。" /></label>
+            </article>)}
+            {!form.subagents.length ? <p className="settings-empty-copy">还没有子代理。添加后保存人格，再到“工具与权限”决定每次询问、始终允许或禁止。</p> : null}
+          </div>
+          <p className="privacy-note">Android 本机模式可以真实委托；连接 FastAPI 时，只有明确支持 subagents 配置与执行的新服务器才会保留并调用它，旧服务器可能忽略该字段。</p>
+        </div> : null}
 
         {activePane === "mcp" ? <div className="persona-pane span-all"><label>绑定 MCP 服务<textarea rows={8} value={form.mcpServers} onChange={(event) => update("mcpServers", event.target.value)} placeholder="每行一个已配置的 MCP 服务名称" /><small>仅绑定全局已配置并通过测试的服务，不在这里保存访问令牌。</small></label></div> : null}
 

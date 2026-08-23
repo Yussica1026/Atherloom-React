@@ -10,6 +10,8 @@ const rows = [
   ["memory_write", "写入记忆", "AI 可新增和修改，不包含删除权限。"],
   ["life_records", "生活记录", "记账、生理期、饮食与重要日期。"],
   ["diary_write", "写日记", "创建或更新当前人格的日记。"],
+  ["autonomy_schedule", "AI 自动唤醒任务", "AI 可提出或创建当前人格的唤醒任务；“每次询问”只生成待你确认的具体提议。"],
+  ["subagent_run", "子代理", "把本轮明确委托的任务交给当前人格已启用的子代理。"],
   ["correspondence", "往来信箱", "读信、写信与联系人操作；不包含暂缓的 AI 会客厅。"],
   ["delete", "删除", "高风险操作保持每次询问。"],
 ] as const;
@@ -46,7 +48,14 @@ export function ToolsSettings({ settings, providers, onSave }: ToolsSettingsProp
   const [status, setStatus] = useState("");
   const [routeStatus, setRouteStatus] = useState("");
 
-  useEffect(() => setPermissions({ memory_read: "allow", delete: "ask", ...(settings.tool_permissions as Record<string, Permission> || {}) }), [settings.tool_permissions]);
+  useEffect(() => setPermissions({
+    memory_read: "allow",
+    life_records: "ask",
+    autonomy_schedule: "ask",
+    subagent_run: "ask",
+    delete: "ask",
+    ...(settings.tool_permissions as Record<string, Permission> || {}),
+  }), [settings.tool_permissions]);
   useEffect(() => setRoutes(routeDraft(settings)), [settings]);
 
   const save = async (next: Record<string, Permission>) => {

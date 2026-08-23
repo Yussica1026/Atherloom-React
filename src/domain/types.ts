@@ -1,6 +1,10 @@
 export const themeNames = ["system", "light", "dark", "water", "mint", "lilac", "blush"] as const;
 
+export const fontNames = ["kai", "song", "hei", "fangsong", "system"] as const;
+
 export type ThemeName = (typeof themeNames)[number];
+
+export type FontName = (typeof fontNames)[number];
 
 export type BackupPart = "conversations" | "personas" | "memory" | "settings" | "games";
 
@@ -25,6 +29,10 @@ export interface BackupRestoreResult {
 
 export function isThemeName(value: string | null): value is ThemeName {
   return themeNames.some((theme) => theme === value);
+}
+
+export function isFontName(value: string | null): value is FontName {
+  return fontNames.some((font) => font === value);
 }
 
 export interface Provider {
@@ -69,6 +77,16 @@ export interface PersonaConfig {
   startup_chat?: "resume" | "new";
   pinned?: boolean;
   message_template?: string;
+  subagents?: SubagentConfig[];
+}
+
+export interface SubagentConfig {
+  id: string;
+  name: string;
+  role: string;
+  instructions: string;
+  provider_id?: string;
+  enabled: boolean;
 }
 
 export interface Persona {
@@ -177,6 +195,88 @@ export interface Favorite {
   owners?: string[];
 }
 
+export type PersistedBoolean = boolean | 0 | 1;
+
+export interface JournalRecord {
+  id: string;
+  persona_key: string;
+  title: string;
+  content: string;
+  space: "user" | "shared" | "ai";
+  author: "user" | "ai";
+  visible_to_user: PersistedBoolean;
+  visible_to_ai: PersistedBoolean;
+  created_at: string;
+  updated_at: string;
+  parlor_id?: string | null;
+  archive_status?: string | null;
+}
+
+export type JournalDraft = Pick<JournalRecord, "title" | "content" | "space" | "author"> & {
+  visible_to_user: boolean;
+  visible_to_ai: boolean;
+};
+
+export interface JournalListPayload {
+  entries: JournalRecord[];
+  sealed_count: number;
+}
+
+export interface BoardRecord {
+  id: string;
+  persona_key: string;
+  content: string;
+  author: string;
+  author_role?: "user" | "assistant" | string;
+  visible_to_user: PersistedBoolean;
+  visible_to_ai: PersistedBoolean;
+  reply_to?: string | null;
+  created_at: string;
+  updated_at?: string;
+  wake_due_at?: string | null;
+}
+
+export interface BoardDraft {
+  content: string;
+  author: "user" | "ai";
+  visible_to_user: boolean;
+  visible_to_ai: boolean;
+  reply_to?: string | null;
+  wake_after_minutes?: number;
+  wake_provider_id?: string | null;
+}
+
+export interface BoardListPayload {
+  messages: BoardRecord[];
+  sealed_count: number;
+}
+
+export interface DreamRecord {
+  id: string;
+  persona_key: string;
+  title: string;
+  raw_text: string;
+  kind: "dream" | "quarantined";
+  summary: string;
+  necropsy: string;
+  claimed: PersistedBoolean;
+  claim_note?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DreamDraft {
+  title: string;
+  raw_text: string;
+  kind: "dream" | "quarantined";
+  summary?: string;
+  necropsy?: string;
+}
+
+export interface DreamListPayload {
+  entries: DreamRecord[];
+}
+
 export type MemoryKind = "fact" | "preference" | "relationship" | "promise" | "event" | "emotion" | "summary" | "diary" | "other";
 
 export interface Memory {
@@ -260,6 +360,7 @@ export interface AppSettings {
   proactive_questions?: boolean;
   typing_presence_enabled?: boolean;
   vision_provider_id?: string;
+  voice_config?: import("../features/voice/types").VoiceConfig;
   [key: string]: unknown;
 }
 
@@ -285,6 +386,9 @@ export interface ChatRequest {
   media_context?: string;
   typing_context?: string;
   thinking_enabled?: boolean;
+  writing_context_mode?: "default" | "none" | "private";
+  tool_mode?: "default" | "none";
+  approved_tool_permissions?: string[];
 }
 
 export interface ChatStreamEvent {

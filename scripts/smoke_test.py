@@ -356,7 +356,7 @@ with sync_playwright() as playwright:
     assert mobile_metrics["innerWidth"] == mobile_metrics["clientWidth"] == mobile_metrics["scrollWidth"] == 390, mobile_metrics
     assert mobile_metrics["inputWeight"] == "400", mobile_metrics
     assert mobile_metrics["inputSize"] == "14px", mobile_metrics
-    assert "Georgia" in mobile_metrics["headingFamily"], mobile_metrics
+    assert "Atherloom WenKai" in mobile_metrics["headingFamily"], mobile_metrics
     page.screenshot(path=artifacts / "settings-api-mobile.png", full_page=True)
     page.get_by_role("button", name="关闭设置").click()
 
@@ -409,9 +409,9 @@ print(json.dumps({
     "mobile_metrics": mobile_metrics,
     "checks": [
         "provider create/edit/delete", "saved key preservation", "model fetch and native select", "provider test",
-        "vision route", "persona eight panes/create/edit/delete", "worldbook entry/create/edit/delete/import/export",
+        "vision route", "persona nine panes/create/edit/delete", "worldbook entry/create/edit/delete/import/export",
         "sanitized full backup and selective restore", "conversation delete against real backend",
         "conversation rename/pin/star/archive and search",
-        "seven themes", "old typography", "old launch animation", "mobile width", "chat stream",
+        "seven themes", "bundled Kaiti typography", "old launch animation", "mobile width", "chat stream",
     ],
 }, ensure_ascii=False, indent=2))

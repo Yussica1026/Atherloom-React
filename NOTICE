@@ -1,1 +1,13 @@
 Required Notice: Copyright 2026 Yussica1026. Atherloom React is licensed under the PolyForm Noncommercial License 1.0.0.
+
+Bundled font notice
+-------------------
+
+LXGW WenKai GB Lite v1.522 is bundled unmodified for offline Simplified
+Chinese Kai-style text. Copyright 2024-2026 LXGW and Copyright 2020 The
+Klee Project Authors. It is distributed under the SIL Open Font License
+1.1 with the upstream additional permission and Reserved Font Names.
+
+The source distribution keeps the notice and license under
+`src/assets/fonts/`. Redistributed web and Android builds keep them under
+`licenses/`.

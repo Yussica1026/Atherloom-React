@@ -1,5 +1,175 @@
 # Atherloom React 工作日志
 
+## 2026-08-23 · v0.2.3 语音、字体、写作与自主能力（发布候选，待 CI 固定签名与真机）
+
+> 本版只发布已经完成并通过自动化回归的 React / Android 功能。长期世界第二阶段仍在旧后端工作树中单独开发，不进入本次 APK，也不推送旧 HTML / FastAPI 仓库；旧 `/api/games` 的代码和公开行为不因本次 React 发布而改变。
+
+### 本版收录
+
+- 语音链路拆为 Android 原生 / 浏览器系统识别输入、严格单轮 `VoiceSession`、现有人格模型回复和系统 / MiniMax TTS 输出；权限拒绝、停止、切后台、返回键和人格切换统一清理。
+- 随包加入 LXGW WenKai GB Lite v1.522 并设为默认正文，另提供书卷宋、清爽黑、仿宋和系统默认；日记、留言板、梦库、备忘样式均使用主题变量与派生色，不固定套用水色。
+- 日记、留言板和梦库重新对照旧 HTML / FastAPI 契约：区分用户、共享、AI 空间与可见性，密封正文不进入普通聊天；Standalone 写作工具使用结构化调用、按次授权、人格绑定、幂等和预算限制。
+- 自动唤醒采用用户可见任务账本、AI 提案待批准、租约、失败重试、次数上限和投递去重；仅在应用前台执行，关闭后下次打开补做，不声称拥有 Android 系统后台常驻能力。
+- 子代理按人格配置，拥有独立提示与线路选择，只接收当前委托，不继承聊天历史、私人空间或工具；默认按次询问，每轮最多两次。工具开放与授权共用同一意图判定，避免“能调用却没有批准”的权限缝隙。
+- 文楷字体的 OFL-1.1 文本与分发说明已经放入 `public/licenses/`，会随 Web 构建进入 APK；顶层 `NOTICE` 同步记录第三方字体来源与许可。
+
+### 长期世界 Review 钉子
+
+- [x] 本次 `v0.2.3` 只推 React / Android 仓库；旧 HTML / FastAPI 仓库与 `/api/games` 不修改、不发布，因此不会由本次 APK 偷偷改变旧角色剧场契约。
+- [ ] 后续 LongWorld 即使使用独立 schema，也必须保持 repository / service 领域依赖真正隔离；只共享基础设施，不共享旧剧场领域事实，旧模块应可独立移除。
+- [ ] 后续 replay 测试必须覆盖移动、物品转移、关系变化、任务推进、存档与 branch，并以 canonical serialization / hash 对初始 snapshot 重放后的 `WorldState` 做逐字节比较。
+
+后两项属于未进入本 APK 的 LongWorld 后续验收条件，不是 `v0.2.3` React 功能的完成声明。
+
+### 发布候选验证
+
+- `npm run typecheck` 通过；`tests/react_regression_contracts.py` 34 项、`android/tests/test_voice_contract.py` 4 项契约通过。
+- `tests/react_ui_smoke.py` 真浏览器移动端流程通过，覆盖自动唤醒、人格子代理配置、按次授权、委托执行、写作空间及关键浮层层级；`tests/react_voice_smoke.py`、Android Standalone 与 bridge 冒烟均通过。
+- production build 通过（312 个模块）；`dist` 中已核对 v0.2.3 Service Worker、文楷字体及随包 OFL / NOTICE。固定签名 GitHub Actions、公开 APK 哈希 / 包信息 / 证书核验仍待本节后续补录；真实 Android 权限、厂商识别、音频焦点和真实 MiniMax Key 仍必须在手机上验收。
+
+## 2026-08-23 · AI 文字游戏 / 长期世界架构调研（第一阶段，仅分析）
+
+> 本阶段按要求只检查现有 Atherloom React、配套 FastAPI 后端及三个参考项目，没有编写或迁移游戏功能代码。本节是用户要求补写的工作日志；除本日志外，本阶段未修改任何项目文件。
+
+### 现有架构结论
+
+- 前端继续保留 React 19 + TypeScript + Vite、`App / Sidebar / useWorkspace` 外壳、现有身份与 Persona、聊天、主题、世界书、语音和 Android Native Bridge，不重写已有页面或部署结构。
+- 配套后端仍由 `claude-local-cn/backend/app.py` 中的 FastAPI + SQLite 提供 Provider、Persona、会话、记忆、世界书和流式聊天。现有角色剧场只有文本回合、角色 Provider 编排和简单状态，不具备严格 WorldState、规则校验、事件重放或长期一致性，因此保留为“轻量角色剧场”，不继续向其中堆叠长期世界逻辑。
+- 新功能建议独立建立 `src/features/longworld/`、`src/adapters/longworld/` 与 `backend/game/`，只在 `App.tsx`、`Sidebar.tsx` 和后端 router 注册处做最小接入。
+- 第一版使用 FastAPI 作为权威规则端；Android 离线实现留作独立里程碑，通过同一 Transport、Schema 和规则契约实现，不把长期世界状态继续塞进现有 `standalone/store.ts`。
+
+### 主体与状态边界
+
+- `Player` 是真人玩家，不绑定 Persona 或 Provider。
+- `AICharacter` 是独立 AI 居民，拥有独立 Persona 快照、Provider / Model、游戏内状态、记忆和自主行动策略；主动行动仍必须走统一游戏回合服务。
+- `NPC` 属于世界模板和运行实例，没有 Persona 或独立 Provider，由 Game Master / world engine 管理。
+- 世界卡采用不可变的 `WorldTemplateVersion`，运行进度采用独立的 `WorldSession / Branch / Revision`。权威历史由追加式事件组成，快照只用于加速加载；存档指向确定 revision，恢复时创建分支而不是覆盖原进度。
+- 物品只保存一个权威位置或所有者，库存与地点清单由该字段派生；关系、任务、条件、已发现事实、开放线索、地点图、电话线程和游戏时间均是一等 WorldState 字段。
+- 游戏记忆使用独立 `game_memories`，按 AICharacter / NPC 的 owner、可见性和来源事件隔离，不能自动进入现实 Persona 记忆。只有已提交事件才能生成长期记忆。
+
+### 权威回合流程
+
+```text
+Player action / AICharacter ActionIntent
+→ 加载带 revision 的 WorldState
+→ 按行动者视角裁剪可见事实并召回独立记忆
+→ Story Director 规划节奏与允许揭露范围
+→ Game Master 输出严格 TurnProposal
+→ JSON Schema / Pydantic 校验
+→ 服务端领域规则与全局不变量校验
+→ 原子提交 WorldEvents 与新 revision
+→ 根据已提交事件保存重要记忆
+→ Narrator 读取 committed snapshot / diff 生成正文
+→ 渲染 narration、dialogue 与状态变化
+```
+
+- LLM 不获得数据库、SQLite、文件写入或任意状态修改工具，只能提出严格判别的领域事件，例如移动、转移物品、更新关系、推进任务、发现事实、打开/解决线索和发送游戏内短信。
+- 每次行动必须携带 `expected_revision` 与幂等键；全部候选事件先在状态副本中验证，通过后再整体提交。失败最多允许一次结构化修复，再失败则整回合不提交。
+- 提交前只显示加载、规划、校验等进度；最终正文必须在状态提交后生成。Narrator 失败时使用已提交事件生成确定性简述，不能出现“正文已发生但事实提交失败”。
+
+### 三个参考项目的只读结论
+
+- **AI Sandbox Game**：可学习世界卡定义态/运行态分离、NPC `card/state`、存档交互、分层地点、探索和手机/SMS；其权威状态主要在浏览器端，校验与自动批准机制不满足本项目的服务器规则要求。框架为 AGPL-3.0，`prompts/` 另为 CC BY-NC-SA 4.0，因此只学习架构并 clean-room 重写，不复制代码、prompt、默认世界、素材或预构建 UI。
+- **Quilltale**：可学习“LLM 负责叙事、程序负责事实”、结构化 WorldState、场景内 NPC 独立情景记忆和候选状态更新；其当前实现缺少严格 Schema、事务、revision 和提交后叙事。仓库当前没有 LICENSE，不能视为可复用开源代码，只采用抽象思想，不复制源码、GM prompt 或 `default.json`。
+- **RPGForge**：可学习 Story Director、批准 delta 重放、任务 / 条件 / open threads / discovered facts、turn / chapter / long-term / narrative 多层压缩和上下文投影。仓库为 MIT；如后续实际复制实质代码或 prompt，必须保留版权和 MIT 文本并在 `NOTICE` 中记录固定提交。架构上仍需补齐独立 AICharacter、严格领域 Schema、库存与知识隔离，并改为 commit 后再展示正文。
+
+### 第一阶段产物与下一步边界
+
+- 已完成当前前后端架构、可复用组件、独立目录、数据模型、API、WorldState、Memory、AI 调用流程、UI 页面、文件清单、来源映射与许可证风险分析。
+- 尚未新增数据库表、API、前端入口、世界卡、提示词、测试、构建产物或 APK，也没有执行代码迁移。
+- 等用户确认进入第二阶段后，优先实现版本化 Schema、领域事件、规则不变量、事件重放、视角脱敏和并发/幂等测试，再接入模型编排与 UI。
+
+## 2026-08-23 · 楷体默认与日记 / 留言板 / 梦库语义补齐（已并入 v0.2.3 发布候选）
+
+> 本节是 v0.2.2 发布后的开发过程记录；当前发布状态与最终验证以顶部 `v0.2.3` 节为准，真实 Android 手机验收仍未完成。
+
+### 字体与主题
+
+- 随包加入 LXGW WenKai GB Lite v1.522，并将文楷设为默认正文字体；无需联网拉取字体，也不会因 CDN 不可用退回不一致的字形。
+- 外观设置提供文楷、书卷宋、清爽黑、仿宋和系统默认共 5 种正文方案，选择会本机持久化，并在页面首次绘制前恢复，避免启动时先闪过系统字体。
+- 字体只改变字形，不建立一套独立固定配色。正文、卡片、输入、提示和选中态继续使用现有主题变量及派生色，跟随浅色、深色、水色、薄荷、丁香、腮红与系统主题统一套色。
+
+### 日记
+
+- React 日记改为调用统一 `fastApi` 日记接口；连接旧 FastAPI 时使用服务端 CRUD，Android Standalone 由本机适配层实现同一请求与返回语义，不再把本机列表冒充已同步的服务器内容。
+- 恢复 `user / shared / ai` 空间，以及“用户可见 / AI 可见”两个互相独立的字段。密封 AI 日记只返回数量；普通主聊天只注入同时对用户和人格可见的日记 / 留言，密封正文只在隔离的私人日记生成模式中提供给所属人格，生成结果直接密封保存，不进入聊天回复。
+- Android Standalone 生成允许用户阅读的 AI 日记时，会关闭写作空间的隐式上下文，只传入已显式筛选为用户可见的旧页，密封旧页不会经标题、摘要或中间步骤进入公开生成。旧 FastAPI 的 `/api/chat` 没有“只生成草稿、不产生服务端副作用”的模式，还会自动注入全部 `visible_to_ai` 日记且不回传可见性元数据；因此连接旧服务器时，React 的立即与定时 AI 日记生成全部禁用，避免临时会话先写入一次、React 再保存一次，或在生成阶段泄露密封内容。用户手写 CRUD 和旧 FastAPI 主聊天自带的受控工具写入不受影响。
+- 新增、修改、删除均带正文长度限制、状态和失败反馈；归档删除会二次确认，并保留 AI 定时日记计划与运行审计，避免一次普通列表写入覆盖这些本机附加状态。
+
+### 留言板
+
+- 留言板改为统一 `fastApi` 读取、发布和删除，保留旧版 `reply_to` 回复关系、对 AI 的独立可见字段、密封数量和按人格隔离；留言只删除目标记录，不把回复或其他本机字段一并误删。
+- Android Standalone 发布一条对 AI 可见的用户留言后，会持久化约 10 分钟后的唤醒任务；任务带租约、失败重试与最多 3 次限制，由所属人格读取可见线程后写回 AI 回复。WebView 存活时到点执行，应用被关闭时在下次打开后补做。
+- AI 在其他人格留言板留下的新便笺进入跨人格未读便笺队列；工作区未打开时可显示便笺，用户可稍后查看、前往所属人格留言板或直接回复。已读集合和队列均设上限，避免无限增长。
+
+### Standalone 主聊天写作工具循环
+
+- Android Standalone 主聊天已接入日记 / 留言板工具循环：读取留言板、写 AI 日记和贴留言均使用严格 `input_schema` 与运行时类型、枚举、长度校验；工具始终绑定当前会话人格，模型参数不能改写 `persona_key`。写权限默认 `ask`，只在本轮用户确认后放行；设为 `deny` 时写工具不开放，留言读取仍只返回同时对用户与人格可见的记录。
+- OpenAI 兼容与 Anthropic 线路优先执行原生结构化 `tool_calls / tool_use`。文本 DSML 仅作为只读留言查询的兼容入口，绝不触发写入；所有写操作必须来自原生结构化调用，避免引用文本或提示注入制造副作用。
+- 工具循环最多 12 轮、总计 12 次调用、每轮最多执行 4 次，并服从用户设置的总超时；停止或超时会取消原生请求。相同用户消息、工具调用 ID 或相同内容会复用既有写入，同一轮最多写 4 篇日记或留言，避免重试造成重复记录。执行、复用、拒绝和错误均作为工具事件进入当前助手消息。
+- 一旦本轮成功写入密封日记或密封留言，最终聊天只返回固定完成说明并清空推理文本；模型不能借后续回答复述、概括或暗示密封正文。
+
+### 梦库
+
+- “让 TA 做梦”改为读取目标人格全部会话中的最近 80 条真实消息，而不是借用当前会话最后几条或制造一个临时主聊天；没有可用片段时明确报错。
+- 生成只把 `summary / raw_text / necropsy` 回填到可编辑草稿，不会自动入库。用户确认后才保存为普通梦境或隔离梦境；保存后的梦仍需通过单独操作显式认领，并可填写认领备注。
+- 梦库按旧版设计不属于主聊天工具：没有梦境读取、生成、保存或认领工具。它继续走独立的“生成草稿 → 用户编辑 → 显式保存 → 隔离梦显式认领”流程，认领也不代表自动注入主聊天上下文。
+
+### 数据安全与恢复
+
+- Android Standalone 首次读取写作库时会按人格合并旧 HTML 的 `atherloom:journals:*`、`atherloom:board:*`、`atherloom:dreams:*` 与 `atherloom:board_wakes`，兼容旧作者、可见性、认领和唤醒字段；迁移按记录 ID 去重且不删除旧键，持久化失败会明确报错，不以空库冒充迁移成功。
+- 旧唤醒记录中 `attempts >= 3` 的任务统一迁为 `error` 终态；Standalone 主状态与 React 镜像同时存在同一任务时，`done` 作为不可逆成功状态永远优先，其余终态再按新鲜度合并，避免未来时间的旧重试镜像把已完成任务改回错误或待执行。
+- 日记、留言、梦境和唤醒任务由 API / Standalone 存储拥有；React 功能空间只持久化定时日记计划、审计和未读便笺等附加状态，不再把缓存列表回写覆盖 API 数据。连接 FastAPI 且首次加载尚未完成时隐藏本机缓存，以载入状态代替旧内容，防止把另一运行模式的数据误认成服务器结果。
+- 选择性备份按勾选范围导出和恢复：外观包含主题与字体，聊天数据、世界书、记忆、游戏/生活簿等本机空间不再因选择其中一项而被整块混入。恢复完成后不会删除刚恢复的 Standalone 状态或恢复前快照。
+- AI 私人日记使用的临时会话加入持久化清理队列：正常结束会删除，删除失败会在下次载入继续重试，同时这些会话始终从用户可见会话列表中过滤，避免异常退出后泄漏。
+
+### 当时验证（后续结果见顶部 v0.2.3）
+
+- 这一子阶段结束时 `npm run typecheck`、33 项回归契约和 4 项 Android 语音契约已通过；随后发布收尾扩展为顶部记录的 34 项，并重跑真浏览器、Standalone、bridge 与 production build。
+- 这一节保留开发过程事实；最终工具链与发布证据统一记录在顶部 v0.2.3 节，不拿更早版本结果冒充本次验证。
+
+### 当时边界
+
+- 写下本节时尚未生成 APK 或推送 Release；当前发布进度见顶部 v0.2.3 节。真实 Android 手机验收仍未完成。
+- 留言提醒会按运行方式给出不同事实：Standalone 且已有可用线路时说明约 10 分钟唤醒及应用关闭后下次打开补做；没有线路时明确要求先配置；连接旧 FastAPI 时只显示服务器返回，不声称存在本机定时任务。
+- Android Standalone 主聊天的日记 / 留言板工具循环已经完成；梦库刻意不提供聊天工具，继续使用独立生成与归档流程。
+- 旧 FastAPI 在普通聊天请求中会自动附带所有对 AI 可见日记，也没有无副作用草稿接口。React 因此在服务器模式禁用全部立即 / 定时 AI 日记生成；用户手写日记 CRUD 和旧 FastAPI 主聊天中已有的受权限控制日记 / 留言工具写入仍可用。待后端提供显式、安全、无副作用的草稿能力后再恢复 React AI 日记生成。
+- 往来的联系人和信件继续使用既有 FastAPI 路径；完全本机的会客厅不能创建或读取真实服务器归档，需要连接后端后申请。真实 Relay 房间、提题、投票、计时、人格唤醒与归档状态机仍待迁移。
+
+## 2026-08-23 · Android 语音稳定架构与 MiniMax TTS（已并入 v0.2.3 发布候选）
+
+> 本节是 v0.2.2 发布后的开发过程记录；当前发布状态与最终验证以顶部 `v0.2.3` 节为准，真实 Android 手机验收仍未完成。
+
+### 问题定位与会话架构
+
+- 用户真机截图中的“无法开始：Permission denied”来自旧语音页直接调用 WebView `getUserMedia` / Web Speech，而当时 Android Manifest 未声明录音权限，`WebChromeClient` 也未处理音频权限请求。旧 HTML 的 Android 测试版曾直接阻止通话页，并没有一条可作为稳定实现沿用的原生通话链。
+- 语音现已拆为 `SpeechInputAdapter -> VoiceSession -> workspace.send -> SpeechOutputAdapter`。输入可自动优先 Android 原生识别或使用浏览器系统识别；模型轮次继续走当前人格、当前线路与现有会话；输出可选系统朗读或 MiniMax TTS。
+- `VoiceSession` 严格串行执行“听一句 → 停麦 → 等人格回复 → 播放”。同一时刻只允许一个识别、一个模型轮次或一个播放；朗读完成后才可按设置继续下一轮。权限拒绝、无语音、超时和播放失败都会终止，不再靠 `onend` 无限重启。
+- 结束、关闭、进入语音设置、Android 返回键、人格切换、页面隐藏、卸载和 Activity 暂停/销毁都会取消识别、停止在途模型请求、停止播放并使迟到回调失效，避免隐藏通话页仍占麦克风或把 TTS 再识别为用户输入。
+
+### Android 原生输入与权限
+
+- Manifest 增加 `RECORD_AUDIO`、可选麦克风声明和系统 `RecognitionService` 查询；运行时权限拒绝会回传明确中文错误并停止，不自动重试。
+- 新增单会话 `NativeSpeechController`，在 Android 主线程管理 `SpeechRecognizer`，包含 30 秒看门狗、会话代次隔离和 `onPause / onResume / onDestroy` 清理。React 通过 `startSpeechRecognition / stopSpeechRecognition` 调用，并由 `window.AtherloomNativeVoice` 接收 `ready / result / error / end`。
+- WebView 权限路径仅信任内置 `appassets.androidplatform.net` 来源，并且只授予 `RESOURCE_AUDIO_CAPTURE`；不会把网页请求的其他资源一起放行。
+
+### MiniMax TTS 与密钥边界
+
+- 按 MiniMax 当前官方公开目录，MiniMax 在本实现中只承担 TTS，不承担 ASR；旧 Realtime 已属于历史接口。当前第一阶段使用 HTTP `POST /v1/t2a_v2`，后续才考虑双向文本流 TTS。
+- Android 原生 `MiniMaxSpeechController` 只允许中国大陆 `api.minimaxi.com` 或海外 `api.minimax.io` 两个固定 HTTPS 主机，不接受前端传入任意基础地址。请求检查 HTTP 状态、`base_resp.status_code`、`trace_id` 与非空音频，再写入临时 MP3 并通过 `MediaPlayer` 播放；完成、失败、替换、取消和退后台都会断开连接、释放播放器并清理缓存。
+- MiniMax API Key 在密码输入和保存桥接时短暂经过页面内存，保存后明文只留在 Android `EncryptedSharedPreferences`。React 持久化配置、`localStorage`、日志和明文备份只保留公开参数与 `has_api_key`，合成请求的 JavaScript payload 不含 Key。浏览器 / FastAPI 模式不会降级保存 Key，需另建服务端安全代理后才能启用 MiniMax 输出。
+- 系统与 MiniMax 输出会按标点分段顺序播放；MiniMax 正常链路每段不超过 240 字符，原生层另有 2,000 字符、8 MiB 响应和 `Content-Length` 硬上限。连接不认识新设置字段的旧 FastAPI 时，React 本机公开配置覆盖层会保住所选语音链路，但仍不会保存 Key。
+- 语音设置新增输入来源、输出来源、语言、自动继续、MiniMax 区域、模型、`voice_id`、语速、音量、音高、Key 保存与试听；界面明确展示实际链路和平台限制。完整设计见 [`docs/VOICE_ARCHITECTURE.md`](docs/VOICE_ARCHITECTURE.md)。
+
+### 当前验证与发布边界
+
+- `npm run typecheck` 与 production `npm run build` 通过；发布收尾时 `tests/react_regression_contracts.py` 已扩展为 34 项通过。
+- `tests/react_voice_smoke.py` 通过，覆盖严格识别/模型/TTS 顺序、识别互斥、停止不重启、权限拒绝不重试、Android 返回键清理、MiniMax 长回复分段原生调用和 Key 不进入任一本机网页存储值。
+- `android/tests/test_voice_contract.py` 覆盖 Manifest、可信来源音频授权、识别控制器生命周期、MiniMax 加密存储、固定域名、响应校验、播放器和取消契约。
+- 既有 `tests/react_ui_smoke.py`、`scripts/android_standalone_test.py` 与 `scripts/android_bridge_test.py` 均通过。UI 回归同时发现并修复会客厅本机配置保存成功提示会被配置同步 effect 立即清空的问题；邀请码仍会在配置变更后失效。
+- 上述是浏览器与静态契约验证，不等同于真机。仍需真实 Android 验证权限首次授予/拒绝/永久拒绝、厂商识别服务、连续多轮、前后台、音频焦点/耳机，以及真实 MiniMax Key、音色、限流、弱网和余额错误。
+- v0.2.3 标签前仍需执行 Android Gradle 固定签名构建并核对公开附件、包信息与证书；真实手机回归继续作为发布后的明确待验边界。
+
 ## 2026-08-23 · v0.2.2 截图复原、主题套色与真实往来边界（已发布，待真机）
 
 > 8 个唯一原图继续保存在本机并排除在 Git 之外；逐图结构与隐私说明见 [`docs/SCREENSHOT_REFERENCE_2026-08-21.md`](docs/SCREENSHOT_REFERENCE_2026-08-21.md)。本节记录 v0.2.2 的实现、自动化验证与公开发布；旧 FastAPI 后端没有修改或推送，真实 Android 手机仍待验收。

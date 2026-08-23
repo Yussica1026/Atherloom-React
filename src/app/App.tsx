@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { fastApi, getApiBase, setApiBase } from "../adapters/fastapi/client";
 import { saveFile } from "../adapters/native/files";
 import { MenuIcon, SparkIcon } from "../components/Icons";
-import { isThemeName, type Attachment, type Message, type MotivationPayload, type ThemeName } from "../domain/types";
+import { isFontName, isThemeName, type Attachment, type FontName, type Message, type MotivationPayload, type ThemeName } from "../domain/types";
 import { Composer } from "../features/chat/Composer";
 import { MessageList } from "../features/chat/MessageList";
 import { VoiceCall } from "../features/chat/VoiceCall";
@@ -13,6 +13,7 @@ import { useWorkspace } from "../features/workspace/useWorkspace";
 import "./styles.css";
 
 const themeKey = "atherloom-react:theme";
+const fontKey = "atherloom-react:font";
 const driveLabels: Record<string, string> = { connection: "联结", curiosity: "好奇", reflection: "反思", duty: "责任", social: "交流", fatigue: "疲劳", closeness: "亲近", stress: "压力", joy: "愉悦" };
 
 function worldbookSelectionKey(conversationId: string | null) {
@@ -79,6 +80,10 @@ export default function App() {
     const stored = localStorage.getItem(themeKey);
     return isThemeName(stored) ? stored : "system";
   });
+  const [font, setFont] = useState<FontName>(() => {
+    const stored = localStorage.getItem(fontKey);
+    return isFontName(stored) ? stored : "kai";
+  });
   const chatRef = useRef<HTMLElement>(null);
   const nearBottomRef = useRef(true);
   const typingStartedRef = useRef(0);
@@ -102,6 +107,11 @@ export default function App() {
     if (theme === "system") colorScheme.addEventListener("change", applyTheme);
     return () => colorScheme.removeEventListener("change", applyTheme);
   }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem(fontKey, font);
+    document.documentElement.dataset.font = font;
+  }, [font]);
 
   useEffect(() => {
     const rawScale = Number(workspace.settings.font_scale || 100);
@@ -481,9 +491,11 @@ export default function App() {
         personaId={workspace.personaId}
         settings={workspace.settings}
         theme={theme}
+        font={font}
         apiBase={getApiBase()}
         onClose={() => setSettingsOpen(false)}
         onThemeChange={setTheme}
+        onFontChange={setFont}
         onApiBaseChange={(value) => {
           setApiBase(value);
           window.location.reload();
@@ -539,10 +551,13 @@ export default function App() {
       />
       <VoiceCall
         open={callOpen}
+        personaKey={workspace.personaId || "__default__"}
         personaName={workspace.personas.find((item) => item.id === workspace.personaId)?.name || "当前人格"}
-        assistantText={[...workspace.messages].reverse().find((item) => item.role === "assistant" && !item.pending)?.content || ""}
+        voiceConfig={workspace.settings.voice_config}
         onClose={() => setCallOpen(false)}
-        onTranscript={async (content) => { await workspace.send(content, [], selectedWorldbookIds); }}
+        onOpenSettings={() => { setCallOpen(false); openSettings("voice"); }}
+        onTranscript={async (content) => (await workspace.send(content, [], selectedWorldbookIds)) || ""}
+        onCancelTranscript={workspace.stop}
       />
     </div>
   );

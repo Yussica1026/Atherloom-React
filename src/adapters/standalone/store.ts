@@ -1603,6 +1603,7 @@ function restoreBackup(bundle: BackupBundle, parts: BackupPart[]): BackupRestore
           vision_mode: provider.vision_mode || "auto",
           cache_mode: provider.cache_mode || "auto",
           prompt_cache_key: provider.prompt_cache_key || "",
+          allow_insecure_http: provider.allow_insecure_http === true,
           source_provider_id: provider.id,
         }, provider.id);
       }

@@ -1,5 +1,24 @@
 # Atherloom React 工作日志
 
+## 2026-08-24 · v0.2.4 Direct Provider 明文误配防护（本地发布候选）
+
+> 本轮按个人自托管应用的实际威胁模型收口：继续支持 localhost、局域网与 FastAPI 后端 HTTP，只防止 Direct Provider 的明显明文误配和凭据跨目标发送，不引入 SaaS 级证书固定或复杂网络策略。本节尚未代表 APK 已发布。
+
+### 修复范围
+
+- Android Direct Provider 的模型列表、非流式聊天和流式聊天统一经过原生 `ProviderEndpointPolicy`；HTTPS 正常放行，常见 loopback、RFC1918、link-local、CGNAT、IPv6 ULA/link-local 与 `.local` / `.lan` / `home.arpa` HTTP 保持可用。
+- 其他 HTTP Direct Provider 必须携带逐线路的明确确认标记；React 仅在 Android 本机直连模式显示主题化风险提示，并在保存、测试或拉取模型前确认，不影响 FastAPI 后端地址。
+- 三条携密请求均关闭实例级自动重定向，任何 3xx 都作为安全错误返回，要求用户填写最终 Base URL；不会把 API Key 或自定义请求头带往重定向目标。
+- 已保存 Key 只能在 Provider 协议和规范化 Base URL 完全相同时复用。编辑线路改变 scheme、host、port、path 或协议后，必须重新填写 Key，避免旧密钥被自动继承到新目标。
+- `usesCleartextTraffic=true` 保留，因为动态本机与 LAN 后端是产品能力；未新增无法覆盖任意局域网地址的静态 Network Security Config。
+
+### 当前验证
+
+- 纯 Java 策略测试覆盖 HTTPS、常见 LAN/loopback HTTP、公网 HTTP 明确确认、近似私网反例、凭据 scope，以及 301/302/303/307/308 双服务器不跟随验证。
+- React 浏览器回归已验证 HTTP 警告、取消时零原生调用、确认标记、HTTPS 无弹窗及既有桌面/移动流程；production build 仍为 312 个模块。
+- 发布门禁新增 `0.2.4` / versionCode `10` / Service Worker 一致性检查，GitHub Actions 在签名构建前运行 Android 安全、语音、React 回归与版本契约，并在 APK badging 中核对版本。
+- 当前改动仅在本地工作树中；未提交、未推送、未创建 `v0.2.4` 标签或 Release，真实 Android Direct Provider 仍待固定签名 APK 真机验证。
+
 ## 2026-08-23 · v0.2.3 语音、字体、写作与自主能力（已发布，待真机）
 
 > 本版只发布已经完成并通过自动化回归的 React / Android 功能。长期世界第二阶段仍在旧后端工作树中单独开发，不进入本次 APK，也不推送旧 HTML / FastAPI 仓库；旧 `/api/games` 的代码和公开行为不因本次 React 发布而改变。

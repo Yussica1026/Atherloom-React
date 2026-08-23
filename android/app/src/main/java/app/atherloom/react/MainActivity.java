@@ -416,15 +416,17 @@ public class MainActivity extends Activity {
                 if (id.isEmpty()) id = UUID.randomUUID().toString();
                 if (provider.optString("api_key").isEmpty()) {
                     JSONObject existing = secureProvider(id);
+                    if (!canReuseProviderKey(existing, provider)) existing = new JSONObject();
                     String sourceId = provider.optString("source_provider_id");
-                    if (existing.optString("api_key").isEmpty() && !sourceId.isEmpty()) existing = secureProvider(sourceId);
+                    if (existing.optString("api_key").isEmpty() && !sourceId.isEmpty()) {
+                        JSONObject source = secureProvider(sourceId);
+                        if (canReuseProviderKey(source, provider)) existing = source;
+                    }
                     if (existing.optString("api_key").isEmpty()) {
                         for (String keyName : secrets.getAll().keySet()) {
                             if (!keyName.startsWith("provider:")) continue;
                             JSONObject candidate = new JSONObject(secrets.getString(keyName, "{}"));
-                            if (candidate.optString("protocol").equals(provider.optString("protocol"))
-                                && candidate.optString("base_url").replaceAll("/+$", "").equals(provider.optString("base_url").replaceAll("/+$", ""))
-                                && !candidate.optString("api_key").isEmpty()) {
+                            if (canReuseProviderKey(candidate, provider)) {
                                 existing = candidate;
                                 break;
                             }
@@ -434,6 +436,10 @@ public class MainActivity extends Activity {
                 }
                 if (provider.optString("name").trim().isEmpty()) throw new Exception("请填写线路名称");
                 if (provider.optString("base_url").trim().isEmpty()) throw new Exception("请填写模型 Base URL");
+                ProviderEndpointPolicy.requireAllowed(
+                    provider.optString("base_url"),
+                    provider.optBoolean("allow_insecure_http", false)
+                );
                 if (provider.optString("model").trim().isEmpty()) throw new Exception("请填写模型 ID");
                 if (provider.optString("api_key").isEmpty()) throw new Exception("请填写或粘贴 API Key");
                 provider.put("id", id);
@@ -581,10 +587,21 @@ public class MainActivity extends Activity {
             if (provider.optString("api_key").isEmpty()) {
                 String sourceId = request.optString("provider_id", request.optString("source_provider_id"));
                 JSONObject saved = secureProvider(sourceId);
-                if (!saved.optString("api_key").isEmpty()) provider.put("api_key", saved.optString("api_key"));
+                if (canReuseProviderKey(saved, provider)) provider.put("api_key", saved.optString("api_key"));
             }
             if (provider.optString("api_key").isEmpty()) throw new Exception("API Key 为空，请重新粘贴并保存");
             return provider;
+        }
+
+        private boolean canReuseProviderKey(JSONObject saved, JSONObject target) {
+            return saved != null
+                && !saved.optString("api_key").isEmpty()
+                && ProviderEndpointPolicy.sameCredentialScope(
+                    saved.optString("protocol"),
+                    saved.optString("base_url"),
+                    target.optString("protocol"),
+                    target.optString("base_url")
+                );
         }
 
         private void applyProviderHeaders(HttpURLConnection connection, JSONObject provider) throws Exception {
@@ -599,6 +616,12 @@ public class MainActivity extends Activity {
             for (Iterator<String> keys = custom.keys(); keys.hasNext();) {
                 String header = keys.next();
                 connection.setRequestProperty(header, custom.optString(header));
+            }
+        }
+
+        private void rejectProviderRedirect(int status) throws Exception {
+            if (status >= 300 && status < 400) {
+                throw new Exception("模型线路返回 HTTP " + status + " 重定向；为避免 API Key 被转发，请直接填写最终 Base URL");
             }
         }
 
@@ -620,15 +643,20 @@ public class MainActivity extends Activity {
             }
             HttpURLConnection connection = null;
             try {
-                connection = (HttpURLConnection) new URL(endpoint).openConnection();
+                connection = ProviderEndpointPolicy.openConnection(
+                    endpoint,
+                    provider.optBoolean("allow_insecure_http", false)
+                );
                 connection.setRequestMethod("GET");
                 connection.setConnectTimeout(25000);
                 connection.setReadTimeout(30000);
                 connection.setRequestProperty("Accept", "application/json");
                 applyProviderHeaders(connection, provider);
                 int status = connection.getResponseCode();
-                String response = read(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
-                if (status >= 400) throw new Exception(httpError(status, response));
+                rejectProviderRedirect(status);
+                boolean success = status >= 200 && status < 300;
+                String response = read(success ? connection.getInputStream() : connection.getErrorStream());
+                if (!success) throw new Exception(httpError(status, response));
                 JSONObject payload = new JSONObject(response);
                 JSONArray rows = payload.optJSONArray("data");
                 if (rows == null) rows = payload.optJSONArray("models");
@@ -711,7 +739,10 @@ public class MainActivity extends Activity {
             HttpURLConnection connection = null;
             try {
                 if (cancelledStreams.contains(callbackId)) throw new Exception("本机模型请求已取消");
-                connection = (HttpURLConnection) new URL(endpoint).openConnection();
+                connection = ProviderEndpointPolicy.openConnection(
+                    endpoint,
+                    provider.optBoolean("allow_insecure_http", false)
+                );
                 streams.put(callbackId, connection);
                 if (cancelledStreams.contains(callbackId)) {
                     streams.remove(callbackId);
@@ -739,8 +770,10 @@ public class MainActivity extends Activity {
                     output.write(payload.toString().getBytes(StandardCharsets.UTF_8));
                 }
                 int status = connection.getResponseCode();
-                String response = read(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
-                if (status >= 400) throw new Exception(httpError(status, response));
+                rejectProviderRedirect(status);
+                boolean success = status >= 200 && status < 300;
+                String response = read(success ? connection.getInputStream() : connection.getErrorStream());
+                if (!success) throw new Exception(httpError(status, response));
                 JSONObject data = new JSONObject(response);
                 String content = "";
                 String reasoning = "";
@@ -872,7 +905,10 @@ public class MainActivity extends Activity {
                     payload.put("thinking", new JSONObject().put("type", "enabled"));
                 }
 
-                connection = (HttpURLConnection) new URL(endpoint).openConnection();
+                connection = ProviderEndpointPolicy.openConnection(
+                    endpoint,
+                    provider.optBoolean("allow_insecure_http", false)
+                );
                 streams.put(callbackId, connection);
                 connection.setRequestMethod("POST");
                 connection.setConnectTimeout(25000);
@@ -894,7 +930,8 @@ public class MainActivity extends Activity {
                     output.write(payload.toString().getBytes(StandardCharsets.UTF_8));
                 }
                 int status = connection.getResponseCode();
-                if (status >= 400) throw new Exception(httpError(status, read(connection.getErrorStream())));
+                rejectProviderRedirect(status);
+                if (status < 200 || status >= 300) throw new Exception(httpError(status, read(connection.getErrorStream())));
 
                 JSONObject usage = new JSONObject();
                 String responseModel = provider.optString("model");

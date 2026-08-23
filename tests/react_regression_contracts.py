@@ -213,12 +213,14 @@ class LegacyRegressionContracts(unittest.TestCase):
         self.assertIn('addEventListener("atherloom:back"', app)
         self.assertIn("new Event('atherloom:back',{cancelable:true})", native)
 
-    def test_provider_edit_reuses_encrypted_key_for_models_and_probe(self):
+    def test_provider_edit_reuses_encrypted_key_only_for_the_same_scope(self):
         provider = source("src/features/settings/ProviderSettings.tsx")
         native = source("android/app/src/main/java/app/atherloom/react/MainActivity.java")
         self.assertIn("provider_id: editingId", provider)
         self.assertIn("source_provider_id: editingId", provider)
         self.assertIn("secureProvider(sourceId)", native)
+        self.assertIn("canReuseProviderKey(saved, provider)", native)
+        self.assertIn("ProviderEndpointPolicy.sameCredentialScope", native)
         self.assertIn('"models".equals(operation)', native)
         self.assertIn('"test".equals(operation)', native)
 

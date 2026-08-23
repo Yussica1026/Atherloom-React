@@ -54,6 +54,7 @@ export interface Provider {
   vision_mode?: "auto" | "openai" | "anthropic" | "text";
   cache_mode?: "auto" | "off" | "anthropic" | "openai";
   prompt_cache_key?: string;
+  allow_insecure_http?: boolean;
 }
 
 export interface PersonaConfig {
@@ -423,6 +424,7 @@ export interface ProviderDraft {
   vision_mode: "auto" | "openai" | "anthropic" | "text";
   cache_mode: "auto" | "off" | "anthropic" | "openai";
   prompt_cache_key: string;
+  allow_insecure_http: boolean;
   source_provider_id?: string | null;
 }
 
@@ -431,6 +433,7 @@ export interface ProviderProbeDraft {
   base_url: string;
   api_key: string;
   custom_headers: string;
+  allow_insecure_http?: boolean;
   provider_id?: string | null;
 }
 

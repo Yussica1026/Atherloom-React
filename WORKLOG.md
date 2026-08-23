@@ -1,8 +1,8 @@
 # Atherloom React 工作日志
 
-## 2026-08-23 · v0.2.2 截图复原、主题套色与真实往来边界（发布准备，待真机）
+## 2026-08-23 · v0.2.2 截图复原、主题套色与真实往来边界（已发布，待真机）
 
-> 8 个唯一原图继续保存在本机并排除在 Git 之外；逐图结构与隐私说明见 [`docs/SCREENSHOT_REFERENCE_2026-08-21.md`](docs/SCREENSHOT_REFERENCE_2026-08-21.md)。本节记录 v0.2.2 发布前的本地实现和自动化验证；旧 FastAPI 后端没有修改或推送，真实 Android 手机仍待验收。
+> 8 个唯一原图继续保存在本机并排除在 Git 之外；逐图结构与隐私说明见 [`docs/SCREENSHOT_REFERENCE_2026-08-21.md`](docs/SCREENSHOT_REFERENCE_2026-08-21.md)。本节记录 v0.2.2 的实现、自动化验证与公开发布；旧 FastAPI 后端没有修改或推送，真实 Android 手机仍待验收。
 
 ### 用户名与设置入口
 
@@ -34,7 +34,11 @@
 
 - TypeScript typecheck、25 项回归契约均已通过；桌面与 390×844 手机真实 Playwright 流程在最终状态连续 3 轮通过。UI 流程覆盖空用户名直达与保存、工作区计算色随水色→丁香→水色真实变化、Standalone 往来禁用态、FastAPI 联系人双重批准/寄信/审计、会客厅配置、日记、留言板、AI 梦境、浮层头部视口边界和逐页截图，控制台与页面错误为 0。
 - production build 通过（304 个模块）；现有主包约 597 kB，Vite 仅给出分包建议，不影响本轮功能验证。
-- 自动化截图位于 `artifacts/react-mobile-*.png`，已人工核对水色主题的侧栏、用户名、往来三页及日记/留言板/梦库。真实 Android 手机、本机 APK 和真实 Relay 会谈尚未验证。
+- Android Standalone 与 FastAPI 桥接脚本均通过；真实旧 FastAPI 的 Provider、人格、世界书、备份、会话、七种主题、手机宽度和流式聊天完整流程通过，测试产生的临时记录已精确清理，未触碰用户数据。
+- 功能提交 `a61442c` 已推送至 `feat/android-apk`，分支构建 `32613300597` 与 `v0.2.2` 标签构建 `32613718762` 均成功；公开 Release 已生成固定签名 APK。
+- APK 大小 `3,075,952` 字节，包名 `app.atherloom.react`，versionCode `8`，versionName `0.2.2-react-release`；APK SHA-256 为 `cde3fca69b77615de5166c33a443f899a588bc7865b709ce484a34d63c970b1d`，固定证书 SHA-256 仍为 `c31ec8be3956258e35b852545d43607ea87cbeefa805593633fa0e522033940a`，v2 签名验证通过。
+- 已从公开 Release 重新下载 APK、校验声明哈希、包信息、签名和内置 React 资源；免登录直链：<https://github.com/Yussica1026/Atherloom-React/releases/download/v0.2.2/Atherloom-React-Android-release.apk>。
+- 自动化截图位于 `artifacts/react-mobile-*.png`，已人工核对水色主题的侧栏、用户名、往来三页及日记/留言板/梦库。真实 Android 手机安装与真实 Relay 会谈仍未验证。
 
 ## 2026-08-21 · v0.2.1 私人日记、输出方式与旧界面复原
 

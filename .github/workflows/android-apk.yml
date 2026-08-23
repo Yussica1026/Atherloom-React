@@ -9,6 +9,7 @@ on:
       - "android/**"
       - "src/**"
       - "public/**"
+      - "tests/**"
       - "index.html"
       - "package.json"
       - "package-lock.json"
@@ -36,6 +37,14 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+      - name: Run release and security contracts
+        run: >-
+          python -m unittest
+          android.tests.test_provider_http_policy
+          android.tests.test_voice_contract
+          tests.react_regression_contracts
+          tests.release_contracts
+          -v
       - uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: "8.10.2"
@@ -67,6 +76,12 @@ jobs:
           grep -Fqi 'c31ec8be3956258e35b852545d43607ea87cbeefa805593633fa0e522033940a' android/apk-signature.txt
           "$AAPT" dump badging "$APK" | tee android/apk-badging.txt
           grep -Fq "package: name='app.atherloom.react'" android/apk-badging.txt
+          grep -Fq "versionCode='10'" android/apk-badging.txt
+          grep -Fq "versionName='0.2.4-react-release'" android/apk-badging.txt
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            EXPECTED_TAG="v$(node -p 'require("./package.json").version')"
+            test "$GITHUB_REF_NAME" = "$EXPECTED_TAG"
+          fi
       - name: Prepare release asset
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash

@@ -17,6 +17,7 @@ NATIVE_MOCK = r"""
   const correspondenceMail = [];
   let chatCount = 0;
   window.__useCorrespondenceBackend = false;
+  window.__providerOperations = [];
   const publicProvider = value => {
     const copy = {...value, has_api_key: Boolean(value.api_key)};
     delete copy.api_key;
@@ -85,6 +86,7 @@ NATIVE_MOCK = r"""
     },
     providerOperationAsync: (operation, raw, callbackId) => {
       const request = JSON.parse(raw || "{}");
+      window.__providerOperations.push({operation, request});
       let body;
       if (operation === "models") body = {models: ["mock-model", "mock-model-pro"]};
       else if (operation === "test") body = {ok: true, message: "连接成功，模型已响应"};
@@ -175,6 +177,15 @@ def assert_dialog_header_in_view(dialog) -> None:
 def run() -> None:
     console_errors: list[str] = []
     page_errors: list[str] = []
+    reject_next_cleartext = [False]
+
+    def handle_dialog(dialog) -> None:
+        if reject_next_cleartext[0] and "HTTP 明文发送" in dialog.message:
+            reject_next_cleartext[0] = False
+            dialog.dismiss()
+        else:
+            dialog.accept()
+
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(channel="msedge", headless=True)
         context = browser.new_context(viewport={"width": 1440, "height": 1000})
@@ -182,7 +193,7 @@ def run() -> None:
         page.add_init_script(NATIVE_MOCK)
         page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
         page.on("pageerror", lambda error: page_errors.append(str(error)))
-        page.on("dialog", lambda dialog: dialog.accept())
+        page.on("dialog", handle_dialog)
         page.goto("http://127.0.0.1:5173", wait_until="networkidle")
 
         assert page.evaluate("document.documentElement.dataset.font") == "kai"
@@ -206,11 +217,22 @@ def run() -> None:
         page.get_by_role("button", name="API 与网关").click()
         page.get_by_role("button", name="添加第一条线路").click()
         page.get_by_label("显示名称").fill("本机测试线路")
-        page.get_by_label("官方或反代 Base URL").fill("https://api.example.com/v1")
+        page.get_by_label("官方或反代 Base URL").fill("http://api.example.com/v1")
         page.get_by_role("button", name="粘贴").click()
         page.get_by_label("当前默认模型").fill("mock-model")
+        page.get_by_text("HTTP Direct Provider 会明文传输", exact=False).wait_for()
+        page.screenshot(path=str(ARTIFACTS / "react-direct-provider-http-warning.png"), full_page=True)
+        reject_next_cleartext[0] = True
+        page.get_by_role("button", name="拉取模型").click()
+        page.get_by_text("HTTP Direct Provider 尚未获得本次线路确认", exact=False).wait_for()
+        assert page.evaluate("window.__providerOperations.length") == 0
         page.get_by_role("button", name="拉取模型").click()
         page.get_by_text("已读取 2 个模型", exact=False).wait_for()
+        cleartext_probe = page.evaluate("window.__providerOperations.at(-1)")
+        assert cleartext_probe["operation"] == "models", cleartext_probe
+        assert cleartext_probe["request"]["allow_insecure_http"] is True, cleartext_probe
+        page.get_by_label("官方或反代 Base URL").fill("https://api.example.com/v1")
+        assert page.get_by_text("HTTP Direct Provider 会明文传输", exact=False).count() == 0
         page.get_by_label("选择已拉取的模型").select_option("mock-model-pro")
         page.get_by_role("button", name="测试当前模型").click()
         page.get_by_text("连接成功，模型已响应", exact=True).wait_for()

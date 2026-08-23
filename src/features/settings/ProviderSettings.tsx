@@ -39,6 +39,7 @@ function emptyDraft(): ProviderDraft {
     vision_mode: "auto",
     cache_mode: "auto",
     prompt_cache_key: "",
+    allow_insecure_http: false,
   };
 }
 
@@ -66,6 +67,7 @@ function draftFromProvider(provider: Provider): ProviderDraft {
     vision_mode: provider.vision_mode || "auto",
     cache_mode: provider.cache_mode || "auto",
     prompt_cache_key: provider.prompt_cache_key || "",
+    allow_insecure_http: provider.allow_insecure_http === true,
     source_provider_id: provider.id,
   };
 }
@@ -74,6 +76,25 @@ function validateHeaders(value: string) {
   const parsed = JSON.parse(value || "{}") as unknown;
   if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
     throw new Error("自定义请求头必须是 JSON 对象");
+  }
+}
+
+function providerUrlProtocol(value: string) {
+  try {
+    const parsed = new URL(value.trim());
+    if (!parsed.hostname || (parsed.protocol !== "http:" && parsed.protocol !== "https:")) throw new Error();
+    return parsed.protocol;
+  } catch {
+    throw new Error("模型 Base URL 必须是完整的 http:// 或 https:// 地址");
+  }
+}
+
+function isNativeDirectProviderMode() {
+  if (!window.AtherloomNative) return false;
+  try {
+    return !(window.AtherloomNative.getBackendUrl?.() || "").trim();
+  } catch {
+    return false;
   }
 }
 
@@ -100,6 +121,7 @@ export function ProviderSettings({
     () => providers.find((provider) => provider.id === editingId) || null,
     [editingId, providers],
   );
+  const nativeDirectProviderMode = isNativeDirectProviderMode();
 
   const updateDraft = <Key extends keyof ProviderDraft>(key: Key, value: ProviderDraft[Key]) => {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -137,10 +159,30 @@ export function ProviderSettings({
 
   const normalizedDraft = () => {
     validateHeaders(draft.custom_headers);
+    providerUrlProtocol(draft.base_url);
     const models = [...new Set([draft.model, ...modelsText.split(/\r?\n/)]
       .map((item) => item.trim())
       .filter(Boolean))];
     return { ...draft, models, source_provider_id: editingId };
+  };
+
+  const approveDirectEndpoint = <Draft extends { base_url: string; allow_insecure_http?: boolean }>(
+    payload: Draft,
+    action: string,
+  ): Draft | null => {
+    const protocol = providerUrlProtocol(payload.base_url);
+    if (!nativeDirectProviderMode || protocol !== "http:" || payload.allow_insecure_http === true) return payload;
+    const approved = window.confirm(
+      `${action}将通过 HTTP 明文发送 API Key、对话内容或图片。\n\n仅当这是你信任的本机或局域网服务时继续。`,
+    );
+    if (!approved) {
+      setStatus("已取消：HTTP Direct Provider 尚未获得本次线路确认。");
+      return null;
+    }
+    setDraft((current) => current.base_url.trim() === payload.base_url.trim()
+      ? { ...current, allow_insecure_http: true }
+      : current);
+    return { ...payload, allow_insecure_http: true };
   };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -148,7 +190,8 @@ export function ProviderSettings({
     setBusy(true);
     setStatus(editingId ? "正在保存线路修改…" : "正在保存新线路…");
     try {
-      const payload = normalizedDraft();
+      const payload = approveDirectEndpoint(normalizedDraft(), "保存这条 Direct Provider 线路");
+      if (!payload) return;
       if (editingId) await onUpdate(editingId, payload);
       else await onCreate(payload);
       closeForm(editingId ? "线路修改已保存" : "线路已保存");
@@ -176,13 +219,16 @@ export function ProviderSettings({
     setStatus("正在使用当前或已保存的密钥拉取模型…");
     try {
       validateHeaders(draft.custom_headers);
-      const result = await onFetchModels({
+      const payload = approveDirectEndpoint({
         protocol: draft.protocol,
         base_url: draft.base_url,
         api_key: draft.api_key,
         custom_headers: draft.custom_headers,
         provider_id: editingId,
-      });
+        allow_insecure_http: draft.allow_insecure_http,
+      }, "拉取模型列表");
+      if (!payload) return;
+      const result = await onFetchModels(payload);
       const models = result.models || [];
       setFetchedModels(models);
       setStatus(models.length ? `已读取 ${models.length} 个模型，请从下拉框选择。` : "线路已响应，但没有返回模型。");
@@ -197,7 +243,9 @@ export function ProviderSettings({
     setBusy(true);
     setStatus("正在测试当前模型…");
     try {
-      const result = await onTest(normalizedDraft());
+      const payload = approveDirectEndpoint(normalizedDraft(), "测试这条 Direct Provider 线路");
+      if (!payload) return;
+      const result = await onTest(payload);
       setStatus(result.message || "连接成功");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "连接测试失败");
@@ -283,7 +331,17 @@ export function ProviderSettings({
               {protocolOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
             </select>
           </label>
-          <label className="span-all">官方或反代 Base URL<input value={draft.base_url} onChange={(event) => updateDraft("base_url", event.target.value)} required inputMode="url" placeholder="https://proxy.example.com/v1" /></label>
+          <label className="span-all">官方或反代 Base URL<input value={draft.base_url} onChange={(event) => {
+            const baseUrl = event.target.value;
+            setDraft((current) => ({
+              ...current,
+              base_url: baseUrl,
+              allow_insecure_http: current.base_url.trim() === baseUrl.trim() ? current.allow_insecure_http : false,
+            }));
+          }} required inputMode="url" placeholder="https://proxy.example.com/v1" /></label>
+          {nativeDirectProviderMode && draft.base_url.trim().toLowerCase().startsWith("http://") ? (
+            <p className="direct-provider-warning span-all">HTTP Direct Provider 会明文传输 API Key、对话和图片。仅用于你信任的本机或局域网服务；保存、测试或拉取模型前需要明确确认。</p>
+          ) : null}
           <label className="span-all">API Key
             <span className="field-with-actions">
               <input

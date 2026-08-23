@@ -1,0 +1,15 @@
+LXGW WenKai GB Lite v1.522
+
+Upstream project:
+https://github.com/lxgw/LxgwWenKaiGB-Lite
+
+Upstream release:
+https://github.com/lxgw/LxgwWenkaiGB-Lite/releases/tag/v1.522
+
+Bundled file: LXGWWenKaiGBLite-Medium.ttf
+SHA-256: 161B7CBFB3400E10E3825D93548AE09209CD4F666BE652A5F49E4D792C5459C0
+License: SIL Open Font License 1.1 with the upstream additional permission
+
+The font file is unmodified and is bundled for offline Simplified Chinese
+Kai-style text in Atherloom web and Android builds. The complete license is
+distributed alongside this notice as LXGW-WenKai-GB-Lite-OFL-1.1.txt.

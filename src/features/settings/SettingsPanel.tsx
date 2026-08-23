@@ -4,6 +4,7 @@ import type {
   BackupBundle,
   BackupPart,
   BackupRestoreResult,
+  FontName,
   McpServer,
   McpServerDraft,
   Persona,
@@ -25,6 +26,8 @@ import { MemorySettings } from "./MemorySettings";
 import { SummarySettings } from "./SummarySettings";
 import { ToolsSettings } from "./ToolsSettings";
 import { RuntimeSettings } from "./RuntimeSettings";
+import { VoiceSettings } from "./VoiceSettings";
+import { AutomationSettings } from "./AutomationSettings";
 
 interface SettingsPanelProps {
   open: boolean;
@@ -36,9 +39,11 @@ interface SettingsPanelProps {
   personaId: string | null;
   settings: AppSettings;
   theme: ThemeName;
+  font: FontName;
   apiBase: string;
   onClose: () => void;
   onThemeChange: (theme: ThemeName) => void;
+  onFontChange: (font: FontName) => void;
   onApiBaseChange: (value: string) => void;
   onSettingsChange: (patch: Partial<AppSettings>) => Promise<AppSettings>;
   onCreateProvider: (draft: ProviderDraft) => Promise<unknown>;
@@ -61,7 +66,7 @@ interface SettingsPanelProps {
   onRefreshMcpServer: (id: string) => Promise<unknown>;
 }
 
-export type SettingsTab = "connection" | "providers" | "personas" | "worldbooks" | "summary" | "memory" | "mcp" | "tools" | "runtime" | "backup" | "appearance";
+export type SettingsTab = "connection" | "providers" | "personas" | "worldbooks" | "summary" | "memory" | "automation" | "mcp" | "tools" | "voice" | "runtime" | "backup" | "appearance";
 
 const tabs: Array<{ value: SettingsTab; label: string }> = [
   { value: "connection", label: "后端连接" },
@@ -70,8 +75,10 @@ const tabs: Array<{ value: SettingsTab; label: string }> = [
   { value: "worldbooks", label: "世界书" },
   { value: "summary", label: "自动总结" },
   { value: "memory", label: "记忆库" },
+  { value: "automation", label: "自动唤醒" },
   { value: "mcp", label: "MCP" },
   { value: "tools", label: "工具与权限" },
+  { value: "voice", label: "语音通话" },
   { value: "runtime", label: "插件中心" },
   { value: "backup", label: "备份与恢复" },
   { value: "appearance", label: "外观" },
@@ -87,6 +94,14 @@ const themes: Array<{ value: ThemeName; label: string }> = [
   { value: "blush", label: "腮红" },
 ];
 
+const fonts: Array<{ value: FontName; label: string; detail: string }> = [
+  { value: "kai", label: "文楷", detail: "默认 · 随包离线字体" },
+  { value: "song", label: "书卷宋", detail: "长文与日记" },
+  { value: "hei", label: "清爽黑", detail: "界面清晰紧凑" },
+  { value: "fangsong", label: "仿宋", detail: "更像纸本文稿" },
+  { value: "system", label: "系统默认", detail: "跟随设备字体" },
+];
+
 export function SettingsPanel({
   open,
   initialTab = "providers",
@@ -97,9 +112,11 @@ export function SettingsPanel({
   personaId,
   settings,
   theme,
+  font,
   apiBase,
   onClose,
   onThemeChange,
+  onFontChange,
   onApiBaseChange,
   onSettingsChange,
   onCreateProvider,
@@ -265,9 +282,13 @@ export function SettingsPanel({
 
             {tab === "memory" ? <MemorySettings personaKey={personaId || "__default__"} /> : null}
 
+            {tab === "automation" ? <AutomationSettings personaKey={personaId || "__default__"} personas={personas} providers={providers} connected={Boolean(apiBase)} /> : null}
+
             {tab === "mcp" ? <McpSettings servers={mcpServers} onCreate={onCreateMcpServer} onUpdate={onUpdateMcpServer} onDelete={onDeleteMcpServer} onTest={onTestMcpServer} onRefresh={onRefreshMcpServer} /> : null}
 
             {tab === "tools" ? <ToolsSettings settings={settings} providers={providers} onSave={onSettingsChange} /> : null}
+
+            {tab === "voice" ? <VoiceSettings settings={settings} onSave={onSettingsChange} /> : null}
 
             {tab === "runtime" ? <RuntimeSettings personaKey={personaId || "__default__"} personas={personas} providers={providers} worldbooks={worldbooks} mcpServers={mcpServers} onOpenMemory={() => setTab("memory")} onOpenMcp={() => setTab("mcp")} onOpenTools={() => setTab("tools")} /> : null}
 
@@ -277,6 +298,10 @@ export function SettingsPanel({
               <div className="section-heading"><h3>外观</h3><p>跟随系统保留最初的暖米白与暖黑灰；水色、薄荷、丁香和腮红只是可选配色。</p></div>
               <label className="theme-setting">主题<select aria-label="主题" value={theme} onChange={(event) => onThemeChange(event.target.value as ThemeName)}>{themes.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
               <div className="theme-swatches">{themes.map((item) => <button type="button" key={item.value} aria-pressed={theme === item.value} className={`theme-swatch swatch-${item.value}${theme === item.value ? " active" : ""}`} onClick={() => onThemeChange(item.value)}><span /><strong>{item.label}</strong></button>)}</div>
+              <div className="font-setting-card">
+                <label>正文字体<select aria-label="正文字体" value={font} onChange={(event) => onFontChange(event.target.value as FontName)}>{fonts.map((item) => <option key={item.value} value={item.value}>{item.label} · {item.detail}</option>)}</select></label>
+                <blockquote className="font-preview" data-preview-font={font}><strong>灯下翻开一页，字里仍有风声。</strong><span>聊天、日记、梦境与留言会使用这套字形；按钮和代码保持清晰。</span></blockquote>
+              </div>
               <form className="appearance-name-editor" onSubmit={(event) => { event.preventDefault(); const nextName = displayNameDraft.trim(); setAppearanceStatus("正在保存用户名…"); void onSettingsChange({ display_name: nextName }).then((saved) => { if (String(saved.display_name || "") !== nextName) throw new Error("后端没有保存用户名，请更新后端后重试"); setAppearanceStatus("用户名已保存"); }).catch((error) => setAppearanceStatus(error instanceof Error ? error.message : "用户名保存失败")); }}>
                 <label>用户名<input maxLength={40} value={displayNameDraft} onChange={(event) => setDisplayNameDraft(event.target.value)} placeholder="输入侧栏显示名称" /></label>
                 <button className="primary-button">保存用户名</button>

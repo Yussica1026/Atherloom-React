@@ -1,16 +1,19 @@
 package app.atherloom.react;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.util.Base64;
 import android.view.ViewGroup;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -41,11 +44,18 @@ import java.util.concurrent.ConcurrentHashMap;
 public class MainActivity extends Activity {
     private static final int REQUEST_OPEN_FILE = 4101;
     private static final int REQUEST_SAVE_FILE = 4102;
+    private static final int REQUEST_RECORD_AUDIO = 4103;
+    private static final String ASSET_HOST = "appassets.androidplatform.net";
     private WebView webView;
     private NativeBridge nativeBridge;
+    private NativeSpeechController speechController;
+    private MiniMaxSpeechController miniMaxSpeechController;
     private ValueCallback<Uri[]> fileChooserCallback;
+    private PermissionRequest pendingMediaPermission;
     private byte[] pendingSaveData;
     private String pendingSaveCallbackId;
+    private boolean recordAudioPermissionInFlight;
+    private boolean destroyed;
 
     @Override
     public void onCreate(Bundle state) {
@@ -66,7 +76,10 @@ public class MainActivity extends Activity {
             .build();
         webView.getSettings().setJavaScriptEnabled(true);
         webView.getSettings().setDomStorageEnabled(true);
-        nativeBridge = new NativeBridge(this, webView);
+        webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
+        speechController = new NativeSpeechController(this, webView);
+        miniMaxSpeechController = new MiniMaxSpeechController(this, webView);
+        nativeBridge = new NativeBridge(this, webView, speechController, miniMaxSpeechController);
         webView.addJavascriptInterface(nativeBridge, "AtherloomNative");
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
@@ -84,6 +97,18 @@ public class MainActivity extends Activity {
                     return false;
                 }
             }
+
+            @Override
+            public void onPermissionRequest(PermissionRequest request) {
+                runOnUiThread(() -> handleMediaPermissionRequest(request));
+            }
+
+            @Override
+            public void onPermissionRequestCanceled(PermissionRequest request) {
+                runOnUiThread(() -> {
+                    if (pendingMediaPermission == request) pendingMediaPermission = null;
+                });
+            }
         });
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -94,11 +119,107 @@ public class MainActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
-                if ("appassets.androidplatform.net".equalsIgnoreCase(uri.getHost())) return false;
-                startActivity(new Intent(Intent.ACTION_VIEW, uri));
+                if (isTrustedAssetNavigation(uri)) return false;
+                if (!request.isForMainFrame()) return true;
+                String scheme = uri == null ? "" : uri.getScheme();
+                if (!("https".equalsIgnoreCase(scheme) || "http".equalsIgnoreCase(scheme))) return true;
+                try {
+                    Intent external = new Intent(Intent.ACTION_VIEW, uri);
+                    external.addCategory(Intent.CATEGORY_BROWSABLE);
+                    startActivity(external);
+                } catch (Exception ignored) {
+                    // A missing browser must not make an external link crash the WebView shell.
+                }
                 return true;
             }
         });
+    }
+
+    private static boolean isTrustedAssetNavigation(Uri uri) {
+        if (uri == null
+            || !"https".equalsIgnoreCase(uri.getScheme())
+            || !ASSET_HOST.equalsIgnoreCase(uri.getHost())
+            || !(uri.getPort() == -1 || uri.getPort() == 443)) return false;
+        String path = uri.getPath();
+        return path != null && path.startsWith("/assets/");
+    }
+
+    void requestRecordAudioPermissionForSpeech() {
+        runOnUiThread(() -> {
+            if (destroyed || isFinishing()) {
+                if (speechController != null) speechController.onRecordAudioPermissionResult(false);
+                return;
+            }
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                if (speechController != null) speechController.onRecordAudioPermissionResult(true);
+                return;
+            }
+            requestRecordAudioPermissionIfNeeded();
+        });
+    }
+
+    private void requestRecordAudioPermissionIfNeeded() {
+        if (recordAudioPermissionInFlight) return;
+        recordAudioPermissionInFlight = true;
+        requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQUEST_RECORD_AUDIO);
+    }
+
+    private void handleMediaPermissionRequest(PermissionRequest request) {
+        if (destroyed || isFinishing() || !isTrustedAssetRequest(request) || !requestsAudioCapture(request)) {
+            denyMediaPermission(request);
+            return;
+        }
+        if (pendingMediaPermission != null && pendingMediaPermission != request) {
+            denyMediaPermission(pendingMediaPermission);
+        }
+        pendingMediaPermission = request;
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            grantPendingAudioPermission();
+            return;
+        }
+        requestRecordAudioPermissionIfNeeded();
+    }
+
+    private static boolean isTrustedAssetRequest(PermissionRequest request) {
+        Uri origin = request == null ? null : request.getOrigin();
+        return origin != null
+            && "https".equalsIgnoreCase(origin.getScheme())
+            && ASSET_HOST.equalsIgnoreCase(origin.getHost())
+            && (origin.getPort() == -1 || origin.getPort() == 443);
+    }
+
+    private static boolean requestsAudioCapture(PermissionRequest request) {
+        if (request == null) return false;
+        for (String resource : request.getResources()) {
+            if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) return true;
+        }
+        return false;
+    }
+
+    private void grantPendingAudioPermission() {
+        PermissionRequest request = pendingMediaPermission;
+        pendingMediaPermission = null;
+        if (request == null || destroyed || !requestsAudioCapture(request)) return;
+        try {
+            request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+        } catch (IllegalStateException ignored) {
+            // Chromium may cancel the request while the Android permission dialog is open.
+        }
+    }
+
+    private static void denyMediaPermission(PermissionRequest request) {
+        if (request == null) return;
+        try {
+            request.deny();
+        } catch (IllegalStateException ignored) {
+            // A canceled Chromium request is already denied and must not crash the activity.
+        }
+    }
+
+    private void denyPendingMediaPermission() {
+        PermissionRequest request = pendingMediaPermission;
+        pendingMediaPermission = null;
+        denyMediaPermission(request);
     }
 
     private void requestFileSave(String fileName, String mimeType, String base64, String callbackId) {
@@ -159,6 +280,20 @@ public class MainActivity extends Activity {
         }
     }
 
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != REQUEST_RECORD_AUDIO) return;
+        recordAudioPermissionInFlight = false;
+        boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+        if (granted) {
+            grantPendingAudioPermission();
+        } else {
+            denyPendingMediaPermission();
+        }
+        if (speechController != null) speechController.onRecordAudioPermissionResult(granted);
+    }
+
     static class NativeBridge {
         private static final String PREFS = "atherloom_react_runtime";
         private static final String BACKEND_URL = "backend_url";
@@ -167,13 +302,22 @@ public class MainActivity extends Activity {
         private final String secureStorageError;
         private final MainActivity activity;
         private final WebView webView;
+        private final NativeSpeechController speechController;
+        private final MiniMaxSpeechController miniMaxSpeechController;
         private final ConcurrentHashMap<String, HttpURLConnection> streams = new ConcurrentHashMap<>();
         private final Set<String> cancelledStreams = ConcurrentHashMap.newKeySet();
 
-        NativeBridge(MainActivity activity, WebView webView) {
+        NativeBridge(
+            MainActivity activity,
+            WebView webView,
+            NativeSpeechController speechController,
+            MiniMaxSpeechController miniMaxSpeechController
+        ) {
             this.activity = activity;
             this.preferences = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
             this.webView = webView;
+            this.speechController = speechController;
+            this.miniMaxSpeechController = miniMaxSpeechController;
             SharedPreferences encrypted = null;
             String encryptionError = "";
             try {
@@ -226,6 +370,41 @@ public class MainActivity extends Activity {
             } catch (Exception error) {
                 return failure(error.getMessage());
             }
+        }
+
+        @JavascriptInterface
+        public String speechRecognitionCapabilities() {
+            return speechController.capabilities();
+        }
+
+        @JavascriptInterface
+        public void startSpeechRecognition(String callbackId, String languageTag) {
+            speechController.start(callbackId, languageTag);
+        }
+
+        @JavascriptInterface
+        public void stopSpeechRecognition(String callbackId) {
+            speechController.stop(callbackId);
+        }
+
+        @JavascriptInterface
+        public String getVoiceProfile() {
+            return miniMaxSpeechController.getVoiceProfile();
+        }
+
+        @JavascriptInterface
+        public String saveVoiceProfile(String raw) {
+            return miniMaxSpeechController.saveVoiceProfile(raw);
+        }
+
+        @JavascriptInterface
+        public void synthesizeSpeechAsync(String raw, String callbackId) {
+            miniMaxSpeechController.synthesizeSpeechAsync(raw, callbackId);
+        }
+
+        @JavascriptInterface
+        public void cancelSpeechSynthesis(String callbackId) {
+            miniMaxSpeechController.cancelSpeechSynthesis(callbackId);
         }
 
         @JavascriptInterface
@@ -308,10 +487,10 @@ public class MainActivity extends Activity {
                             .put("max_tokens", 16)
                             .put("temperature", 0)
                             .put("thinking_enabled", false);
-                        directChat(probe);
+                        directChat(probe, callbackId);
                         response = new JSONObject().put("ok", true).put("message", "连接成功，模型已响应");
                     } else if ("chat".equals(operation)) {
-                        response = directChat(request);
+                        response = directChat(request, callbackId);
                     } else {
                         throw new Exception("不支持的本机模型操作");
                     }
@@ -468,7 +647,7 @@ public class MainActivity extends Activity {
             }
         }
 
-        private JSONObject directChat(JSONObject request) throws Exception {
+        private JSONObject directChat(JSONObject request, String callbackId) throws Exception {
             JSONObject provider = providerFromRequest(request);
             String protocol = provider.optString("protocol", "openai");
             String base = provider.getString("base_url").replaceAll("/+$", "")
@@ -485,13 +664,34 @@ public class MainActivity extends Activity {
                 .put("max_tokens", request.optInt("max_tokens", provider.optInt("max_tokens", 4096)))
                 .put("temperature", request.optDouble("temperature", provider.optDouble("temperature", 0.7)))
                 .put("top_p", request.optDouble("top_p", provider.optDouble("top_p", 1.0)))
+                .put("stream", false)
                 .put("messages", messages);
             JSONObject customBody = request.optJSONObject("custom_body");
             if (customBody != null) {
                 for (Iterator<String> keys = customBody.keys(); keys.hasNext();) {
                     String key = keys.next();
-                    if ("model".equals(key) || "messages".equals(key)) continue;
+                    if ("model".equals(key) || "messages".equals(key) || "stream".equals(key)
+                        || "tools".equals(key) || "tool_choice".equals(key)) continue;
                     payload.put(key, customBody.get(key));
+                }
+            }
+            JSONArray requestTools = request.optJSONArray("tools");
+            if (requestTools != null && requestTools.length() > 0) {
+                if ("anthropic".equals(protocol)) {
+                    payload.put("tools", requestTools);
+                } else {
+                    JSONArray providerTools = new JSONArray();
+                    for (int index = 0; index < requestTools.length(); index++) {
+                        JSONObject tool = requestTools.optJSONObject(index);
+                        if (tool == null || tool.optString("name").isEmpty()) continue;
+                        providerTools.put(new JSONObject().put("type", "function").put("function", new JSONObject()
+                            .put("name", tool.optString("name"))
+                            .put("description", tool.optString("description"))
+                            .put("parameters", tool.optJSONObject("input_schema") == null
+                                ? new JSONObject().put("type", "object").put("properties", new JSONObject())
+                                : tool.optJSONObject("input_schema"))));
+                    }
+                    if (providerTools.length() > 0) payload.put("tools", providerTools);
                 }
             }
             String system = request.optString("system");
@@ -507,12 +707,20 @@ public class MainActivity extends Activity {
                 payload.put("thinking", new JSONObject().put("type", "enabled"));
             }
 
+            int requestTimeoutMs = Math.max(1000, Math.min(900000, request.optInt("request_timeout_ms", 180000)));
             HttpURLConnection connection = null;
             try {
+                if (cancelledStreams.contains(callbackId)) throw new Exception("本机模型请求已取消");
                 connection = (HttpURLConnection) new URL(endpoint).openConnection();
+                streams.put(callbackId, connection);
+                if (cancelledStreams.contains(callbackId)) {
+                    streams.remove(callbackId);
+                    connection.disconnect();
+                    throw new Exception("本机模型请求已取消");
+                }
                 connection.setRequestMethod("POST");
-                connection.setConnectTimeout(25000);
-                connection.setReadTimeout(180000);
+                connection.setConnectTimeout(Math.min(25000, requestTimeoutMs));
+                connection.setReadTimeout(requestTimeoutMs);
                 connection.setDoOutput(true);
                 connection.setRequestProperty("Accept", "application/json");
                 connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
@@ -526,6 +734,7 @@ public class MainActivity extends Activity {
                         connection.setRequestProperty(header, customHeaders.optString(header));
                     }
                 }
+                if (cancelledStreams.contains(callbackId)) throw new Exception("本机模型请求已取消");
                 try (OutputStream output = connection.getOutputStream()) {
                     output.write(payload.toString().getBytes(StandardCharsets.UTF_8));
                 }
@@ -535,8 +744,11 @@ public class MainActivity extends Activity {
                 JSONObject data = new JSONObject(response);
                 String content = "";
                 String reasoning = "";
+                JSONArray toolCalls = new JSONArray();
+                Object rawAssistant = new JSONObject();
                 if ("anthropic".equals(protocol)) {
                     JSONArray blocks = data.optJSONArray("content");
+                    rawAssistant = blocks == null ? new JSONArray() : blocks;
                     StringBuilder text = new StringBuilder();
                     StringBuilder thought = new StringBuilder();
                     if (blocks != null) {
@@ -545,6 +757,19 @@ public class MainActivity extends Activity {
                             if (block == null) continue;
                             if ("thinking".equals(block.optString("type"))) thought.append(block.optString("thinking"));
                             else if ("text".equals(block.optString("type"))) text.append(block.optString("text"));
+                            else if ("tool_use".equals(block.optString("type")) && !block.optString("name").isEmpty()) {
+                                if (toolCalls.length() >= 16) throw new Exception("模型单轮返回的工具调用过多，Atherloom 已停止执行");
+                                String toolCallId = block.optString("id");
+                                if (toolCallId.isEmpty()) {
+                                    toolCallId = "tool-" + callbackId + "-" + index;
+                                    block.put("id", toolCallId);
+                                }
+                                toolCalls.put(new JSONObject()
+                                    .put("id", toolCallId)
+                                    .put("name", block.optString("name"))
+                                    .put("arguments", block.optJSONObject("input") == null ? new JSONObject() : block.optJSONObject("input"))
+                                    .put("source", "native"));
+                            }
                         }
                     }
                     content = text.toString();
@@ -554,22 +779,53 @@ public class MainActivity extends Activity {
                     JSONObject choice = choices == null || choices.length() == 0 ? null : choices.optJSONObject(0);
                     JSONObject message = choice == null ? null : choice.optJSONObject("message");
                     if (message != null) {
+                        rawAssistant = message;
                         content = textValue(message.opt("content"));
                         reasoning = textValue(message.opt("reasoning_content"));
                         if (reasoning.isEmpty()) reasoning = textValue(message.opt("reasoning"));
+                        JSONArray nativeCalls = message.optJSONArray("tool_calls");
+                        if (nativeCalls != null) {
+                            for (int index = 0; index < nativeCalls.length(); index++) {
+                                JSONObject nativeCall = nativeCalls.optJSONObject(index);
+                                JSONObject function = nativeCall == null ? null : nativeCall.optJSONObject("function");
+                                if (function == null || function.optString("name").isEmpty()) continue;
+                                if (toolCalls.length() >= 16) throw new Exception("模型单轮返回的工具调用过多，Atherloom 已停止执行");
+                                String toolCallId = nativeCall.optString("id");
+                                if (toolCallId.isEmpty()) {
+                                    toolCallId = "tool-" + callbackId + "-" + index;
+                                    nativeCall.put("id", toolCallId);
+                                }
+                                JSONObject arguments = new JSONObject();
+                                String rawArguments = function.optString("arguments", "{}");
+                                try {
+                                    arguments = new JSONObject(rawArguments.isEmpty() ? "{}" : rawArguments);
+                                } catch (Exception invalidArguments) {
+                                    arguments.put("_argument_error", "工具参数不是有效 JSON 对象");
+                                }
+                                toolCalls.put(new JSONObject()
+                                    .put("id", toolCallId)
+                                    .put("name", function.optString("name"))
+                                    .put("arguments", arguments)
+                                    .put("source", "native"));
+                            }
+                        }
                     }
                     if (content.isEmpty() && choice != null) content = textValue(choice.opt("text"));
                     if (content.isEmpty()) content = textValue(data.opt("output_text"));
                 }
-                if (content.trim().isEmpty() && !reasoning.trim().isEmpty()) content = reasoning.trim();
-                if (content.trim().isEmpty()) throw new Exception("模型没有返回正文");
+                if (content.trim().isEmpty() && !reasoning.trim().isEmpty() && toolCalls.length() == 0) content = reasoning.trim();
+                if (content.trim().isEmpty() && toolCalls.length() == 0) throw new Exception("模型没有返回正文或工具调用");
                 JSONObject result = new JSONObject()
                     .put("content", content)
                     .put("reasoning", reasoning)
-                    .put("model", data.optString("model", provider.optString("model")));
+                    .put("model", data.optString("model", provider.optString("model")))
+                    .put("tool_calls", toolCalls)
+                    .put("raw_assistant", rawAssistant);
                 if (data.optJSONObject("usage") != null) result.put("usage", data.optJSONObject("usage"));
                 return result;
             } finally {
+                streams.remove(callbackId);
+                cancelledStreams.remove(callbackId);
                 if (connection != null) connection.disconnect();
             }
         }
@@ -870,13 +1126,54 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        if (webView != null) {
+            webView.onResume();
+            webView.resumeTimers();
+        }
+        if (speechController != null) speechController.onResume();
+        if (miniMaxSpeechController != null) miniMaxSpeechController.onResume();
+    }
+
+    @Override
+    protected void onPause() {
+        if (speechController != null) speechController.onPause(recordAudioPermissionInFlight);
+        if (miniMaxSpeechController != null) miniMaxSpeechController.onPause();
+        if (webView != null) {
+            webView.onPause();
+            webView.pauseTimers();
+        }
+        super.onPause();
+    }
+
+    @Override
     protected void onDestroy() {
+        destroyed = true;
+        recordAudioPermissionInFlight = false;
+        denyPendingMediaPermission();
+        if (speechController != null) speechController.destroy();
+        if (miniMaxSpeechController != null) miniMaxSpeechController.destroy();
         if (nativeBridge != null) nativeBridge.streams.values().forEach(HttpURLConnection::disconnect);
         if (fileChooserCallback != null) fileChooserCallback.onReceiveValue(null);
         fileChooserCallback = null;
         pendingSaveData = null;
         pendingSaveCallbackId = null;
-        if (webView != null) webView.destroy();
+        if (webView != null) {
+            webView.stopLoading();
+            webView.removeJavascriptInterface("AtherloomNative");
+            webView.setWebChromeClient(null);
+            webView.setWebViewClient(null);
+            if (webView.getParent() instanceof ViewGroup) {
+                ((ViewGroup) webView.getParent()).removeView(webView);
+            }
+            webView.removeAllViews();
+            webView.destroy();
+            webView = null;
+        }
+        nativeBridge = null;
+        speechController = null;
+        miniMaxSpeechController = null;
         super.onDestroy();
     }
 }

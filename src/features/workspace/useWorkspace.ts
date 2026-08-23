@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fastApi, streamChat } from "../../adapters/fastapi/client";
+import { isStandaloneAndroid } from "../../adapters/standalone/store";
 import type {
   AppSettings,
   Attachment,
@@ -18,10 +19,84 @@ import type {
   Worldbook,
   WorldbookDraft,
 } from "../../domain/types";
+import { subagentIntentPattern } from "../../domain/toolIntents";
+import { normalizeVoiceConfig } from "../voice/types";
 
 const providerKey = "atherloom-react:last-provider";
 const personaKey = "atherloom-react:last-persona";
 const conversationKey = "atherloom-react:last-conversation";
+const voiceConfigKey = "atherloom-react:voice-config:v1";
+const privateConversationCleanupKey = "atherloom-react:private-conversation-cleanup:v1";
+
+function readPrivateConversationCleanupQueue() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(privateConversationCleanupKey) || "[]") as unknown;
+    if (!Array.isArray(parsed)) return [] as string[];
+    return [...new Set(parsed.map((value) => String(value || "").trim()).filter(Boolean))];
+  } catch {
+    return [] as string[];
+  }
+}
+
+function writePrivateConversationCleanupQueue(ids: string[]) {
+  const normalized = [...new Set(ids.map((value) => value.trim()).filter(Boolean))];
+  if (normalized.length) localStorage.setItem(privateConversationCleanupKey, JSON.stringify(normalized));
+  else localStorage.removeItem(privateConversationCleanupKey);
+  return normalized;
+}
+
+function queuePrivateConversationCleanup(id: string) {
+  return writePrivateConversationCleanupQueue([...readPrivateConversationCleanupQueue(), id]);
+}
+
+function removePrivateConversationCleanup(id: string) {
+  return writePrivateConversationCleanupQueue(readPrivateConversationCleanupQueue().filter((value) => value !== id));
+}
+
+function conversationIsAlreadyDeleted(error: unknown) {
+  const detail = error instanceof Error ? error.message : String(error || "");
+  return /(?:HTTP|请求失败)\s*404\b|会话不存在|not found/i.test(detail);
+}
+
+async function deletePrivateConversationOrQueue(id: string) {
+  try {
+    await fastApi.deleteConversation(id);
+    removePrivateConversationCleanup(id);
+    return true;
+  } catch (error) {
+    if (conversationIsAlreadyDeleted(error)) {
+      removePrivateConversationCleanup(id);
+      return true;
+    }
+    queuePrivateConversationCleanup(id);
+    return false;
+  }
+}
+
+async function retryPrivateConversationCleanup(ids: string[]) {
+  for (const id of ids) {
+    try {
+      await deletePrivateConversationOrQueue(id);
+    } catch {
+      // The ID was already persisted before hydrate; keep it hidden for the next retry.
+    }
+  }
+  return readPrivateConversationCleanupQueue();
+}
+
+function readLocalVoiceConfig(): AppSettings["voice_config"] {
+  try {
+    const raw = localStorage.getItem(voiceConfigKey);
+    return raw ? normalizeVoiceConfig(JSON.parse(raw)) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function withLocalVoiceConfig(settings: AppSettings): AppSettings {
+  const voiceConfig = readLocalVoiceConfig();
+  return voiceConfig ? { ...settings, voice_config: voiceConfig } : settings;
+}
 
 function personaScope(personaId: string | null) {
   return personaId || "__default__";
@@ -90,22 +165,6 @@ function parsePrivateJournal(value: string, personaName: string) {
   return { title: `${personaName}的日记 · ${new Date().toLocaleDateString("zh-CN")}`, content: normalized.slice(0, 30000) };
 }
 
-function parsePrivateDream(value: string, personaName: string) {
-  const normalized = value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
-  const candidate = normalized.match(/\{[\s\S]*\}/)?.[0] || "";
-  if (candidate) {
-    try {
-      const parsed = JSON.parse(candidate) as { title?: unknown; content?: unknown };
-      const content = String(parsed.content || "").trim();
-      if (content) return { title: String(parsed.title || "").trim().slice(0, 120) || `${personaName}的一场梦`, content: content.slice(0, 30000) };
-    } catch {
-      // Preserve usable dream prose when a model returns malformed JSON around it.
-    }
-  }
-  if (!normalized) throw new Error("模型没有返回梦境内容");
-  return { title: `${personaName}的梦 · ${new Date().toLocaleDateString("zh-CN")}`, content: normalized.slice(0, 30000) };
-}
-
 export function useWorkspace() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
@@ -121,6 +180,7 @@ export function useWorkspace() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [privateCleanupIds, setPrivateCleanupIds] = useState<string[]>(readPrivateConversationCleanupQueue);
   const abortRef = useRef<AbortController | null>(null);
   const settingsRef = useRef<AppSettings>({});
   const settingsSaveRef = useRef<Promise<unknown>>(Promise.resolve());
@@ -135,21 +195,27 @@ export function useWorkspace() {
       setLoading(true);
       setError("");
       try {
-        const [payload, nextFavorites] = await Promise.all([
+        const queuedCleanupIds = readPrivateConversationCleanupQueue();
+        setPrivateCleanupIds(queuedCleanupIds);
+        const [payload, nextFavorites, remainingCleanupIds] = await Promise.all([
           fastApi.bootstrap(),
           fastApi.listFavorites().catch(() => [] as Favorite[]),
+          retryPrivateConversationCleanup(queuedCleanupIds),
         ]);
+        const hiddenCleanupIds = new Set([...queuedCleanupIds, ...remainingCleanupIds]);
         const nextProviders = payload.providers || [];
         const nextPersonas = payload.personas || [];
-        const nextConversations = payload.conversations || [];
+        const nextConversations = (payload.conversations || []).filter((conversation) => !hiddenCleanupIds.has(conversation.id));
+        setPrivateCleanupIds(readPrivateConversationCleanupQueue());
         setProviders(nextProviders);
         setPersonas(nextPersonas);
         setWorldbooks(payload.worldbooks || []);
         setConversations(nextConversations);
-        setSettings(payload.settings || {});
+        const nextSettings = withLocalVoiceConfig(payload.settings || {});
+        setSettings(nextSettings);
         setFavorites(nextFavorites);
         setMcpServers(payload.mcp_servers || []);
-        settingsRef.current = payload.settings || {};
+        settingsRef.current = nextSettings;
 
         const storedProvider = localStorage.getItem(providerKey);
         const storedPersona = localStorage.getItem(personaKey);
@@ -200,11 +266,11 @@ export function useWorkspace() {
   useEffect(() => { void hydrate(); }, [hydrate]);
 
   const visibleConversations = useMemo(
-    () => conversations.filter((conversation) => (conversation.persona_id || null) === personaId),
-    [conversations, personaId],
+    () => conversations.filter((conversation) => !privateCleanupIds.includes(conversation.id) && (conversation.persona_id || null) === personaId),
+    [conversations, personaId, privateCleanupIds],
   );
 
-  const currentConversation = conversations.find((conversation) => conversation.id === currentId) || null;
+  const currentConversation = privateCleanupIds.includes(currentId || "") ? null : conversations.find((conversation) => conversation.id === currentId) || null;
 
   const setProviderId = useCallback((id: string) => {
     setProviderIdState(id || null);
@@ -432,6 +498,22 @@ export function useWorkspace() {
     const trimmed = content.trim();
     if (!trimmed || busy) return;
     if (!providerId) throw new Error("请先添加并选择 API 线路");
+    const toolPermissions = settingsRef.current.tool_permissions && typeof settingsRef.current.tool_permissions === "object"
+      ? settingsRef.current.tool_permissions as Record<string, unknown>
+      : {};
+    const writingToolIntent = /日记|留言板|便利贴|便笺|留给你的话|给我留言|写下来/u.test(trimmed);
+    const lifeRecordToolIntent = /备忘录|备忘一下|记个备忘|生活簿|待办|待办清单|任务清单|(?:备忘|便签).{0,12}(?:风格|颜色|色调|主题|版式)|(?:风格|颜色|色调|主题|版式).{0,12}(?:备忘|便签)/u.test(trimmed);
+    const subagentToolIntent = subagentIntentPattern.test(trimmed);
+    const approvedToolPermissions: string[] = [];
+    if (writingToolIntent && String(toolPermissions.diary_write || "ask") === "ask" && window.confirm(
+      "允许 AI 在本轮按需写日记或在留言板贴便笺吗？\n\n只对本轮有效；密封内容不会显示在聊天里。",
+    )) approvedToolPermissions.push("diary_write");
+    if (lifeRecordToolIntent && String(toolPermissions.life_records || "ask") === "ask" && window.confirm(
+      "允许 AI 在本轮新增一条备忘或待办吗？\n\nAI 可以选择版式与主题色调；只允许新增，不允许删除或改写已有记录。",
+    )) approvedToolPermissions.push("life_records");
+    if (subagentToolIntent && String(toolPermissions.subagent_run || "ask") === "ask" && window.confirm(
+      "允许 AI 在本轮调用当前人格已启用的子代理吗？\n\n子代理只会收到这次明确委托的任务，不会获得完整聊天记录。",
+    )) approvedToolPermissions.push("subagent_run");
 
     const conversation = currentId ? conversations.find((item) => item.id === currentId) : await createConversation();
     if (!conversation) throw new Error("无法创建对话");
@@ -490,6 +572,7 @@ export function useWorkspace() {
         worldbook_ids: worldbookIds,
         typing_context: reuseUserMessageId ? "" : typingContext,
         thinking_enabled: provider?.thinking_enabled !== false,
+        approved_tool_permissions: approvedToolPermissions,
       }, controller.signal, (event) => {
         if (event.error) throw new Error(event.error);
         assistantText += event.delta || "";
@@ -535,7 +618,7 @@ export function useWorkspace() {
     runGeneration(content, null, attachments, worldbookIds, typingContext)
   ), [runGeneration]);
 
-  const generatePrivateJournal = useCallback(async (targetPersonaKey: string, trigger: "manual" | "scheduled" | "catch_up", guidance = "") => {
+  const generatePrivateJournal = useCallback(async (targetPersonaKey: string, trigger: "manual" | "scheduled" | "catch_up", guidance = "", visibleToUser = false) => {
     if (busy) throw new Error("当前聊天正在生成，请稍后再写日记");
     if (privateGenerationRef.current) throw new Error("已有一篇私人日记正在生成");
     const targetPersonaId = targetPersonaKey === "__default__" ? null : targetPersonaKey;
@@ -543,6 +626,9 @@ export function useWorkspace() {
     if (targetPersonaId && !targetPersona) throw new Error("日记计划所属人格已不存在");
     const targetProviderId = targetPersona?.config?.provider_id || targetPersona?.provider_id || (targetPersonaId === personaId ? providerId : null) || providers.find((item) => item.enabled !== false)?.id || null;
     if (!targetProviderId) throw new Error("请先为这个人格选择可用的 API 线路");
+    if (!isStandaloneAndroid()) {
+      throw new Error("当前旧 FastAPI 没有无副作用的日记草稿模式。为避免重复写入或泄露密封内容，服务器模式暂不执行 AI 日记生成。");
+    }
 
     privateGenerationRef.current = true;
     const controller = new AbortController();
@@ -569,6 +655,8 @@ export function useWorkspace() {
         worldbook_ids: [],
         typing_context: "",
         thinking_enabled: false,
+        writing_context_mode: visibleToUser ? "none" : "private",
+        tool_mode: "none",
       }, controller.signal, (event) => {
         if (event.error) throw new Error(event.error);
         output += event.delta || "";
@@ -581,11 +669,14 @@ export function useWorkspace() {
     } finally {
       window.clearTimeout(timeout);
       privateGenerationRef.current = false;
-      if (temporary) await fastApi.deleteConversation(temporary.id).catch(() => undefined);
+      if (temporary) {
+        await deletePrivateConversationOrQueue(temporary.id);
+        setPrivateCleanupIds(readPrivateConversationCleanupQueue());
+      }
     }
   }, [busy, personaId, personas, providerId, providers]);
 
-  const generatePrivateDream = useCallback(async (targetPersonaKey: string, guidance = "") => {
+  const generatePrivateDream = useCallback(async (targetPersonaKey: string) => {
     if (busy) throw new Error("当前聊天正在生成，请稍后再让 TA 做梦");
     if (privateGenerationRef.current) throw new Error("已有一项私人写作正在生成");
     const targetPersonaId = targetPersonaKey === "__default__" ? null : targetPersonaKey;
@@ -595,50 +686,18 @@ export function useWorkspace() {
     if (!targetProviderId) throw new Error("请先为这个人格选择可用的 API 线路");
 
     privateGenerationRef.current = true;
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 180_000);
-    let temporary: Conversation | null = null;
-    let output = "";
     try {
-      temporary = await fastApi.createConversation(targetProviderId, targetPersonaId);
-      const recentConversation = targetPersonaId === personaId ? messages
-        .filter((item) => (item.role === "user" || item.role === "assistant") && !item.pending && !item.error)
-        .slice(-12)
-        .map((item) => `${item.role === "user" ? "用户" : targetPersona?.name || "当前人格"}：${item.content}`)
-        .join("\n")
-        .slice(0, 8000) : "";
-      const prompt = [
-        "【AI 梦境写作】",
-        "请以当前人格的第一人称，从近期真实对话碎片长出一场明确属于梦境的叙事。它不是现实回忆，也不是回复用户；不要问候、解释任务或声称梦境真实发生。",
-        recentConversation ? `近期对话碎片：\n${recentConversation}` : "当前没有可引用的近期对话，请诚实写成一场没有特定现实事件的梦。",
-        guidance.trim() ? `用户可选线索：\n${guidance.trim().slice(0, 3000)}` : "用户没有额外指定梦境线索。",
-        "只输出 JSON 对象，不要 Markdown 代码围栏：{\"title\":\"简短梦名\",\"content\":\"梦境正文\"}",
-      ].join("\n");
-      await streamChat({
-        conversation_id: temporary.id,
-        content: prompt,
-        provider_id: targetProviderId,
-        persona_id: targetPersonaId,
-        local_time: localTimeContext(),
-        attachments: [],
-        worldbook_ids: [],
-        typing_context: "",
-        thinking_enabled: false,
-      }, controller.signal, (event) => {
-        if (event.error) throw new Error(event.error);
-        output += event.delta || "";
-      });
-      if (controller.signal.aborted) throw new Error("梦境生成超时，请稍后重试");
-      return parsePrivateDream(output, targetPersona?.name || "默认人格");
-    } catch (error) {
-      if (controller.signal.aborted) throw new Error("梦境生成超时，请稍后重试");
-      throw error;
+      const draft = await fastApi.generateDream(targetPersonaKey, targetProviderId);
+      const content = draft.raw_text.trim();
+      if (!content) throw new Error("模型没有返回梦境内容");
+      return {
+        title: draft.title.trim().slice(0, 120) || `${targetPersona?.name || "默认人格"}的一场梦`,
+        content: content.slice(0, 30000),
+      };
     } finally {
-      window.clearTimeout(timeout);
       privateGenerationRef.current = false;
-      if (temporary) await fastApi.deleteConversation(temporary.id).catch(() => undefined);
     }
-  }, [busy, messages, personaId, personas, providerId, providers]);
+  }, [busy, personaId, personas, providerId, providers]);
 
   const regenerateMessage = useCallback(async (message: Message) => {
     const userId = message.role === "user" ? message.id : message.parent_message_id;
@@ -838,14 +897,20 @@ export function useWorkspace() {
 
   const updateSettings = useCallback(async (patch: Partial<AppSettings>) => {
     const previous = settingsRef.current;
-    const optimistic = { ...previous, ...patch };
+    const includesVoiceConfig = Object.prototype.hasOwnProperty.call(patch, "voice_config");
+    const previousLocalVoiceConfig = includesVoiceConfig ? localStorage.getItem(voiceConfigKey) : null;
+    const normalizedPatch = includesVoiceConfig
+      ? { ...patch, voice_config: normalizeVoiceConfig(patch.voice_config) }
+      : patch;
+    if (includesVoiceConfig) localStorage.setItem(voiceConfigKey, JSON.stringify(normalizedPatch.voice_config));
+    const optimistic = { ...previous, ...normalizedPatch };
     const revision = ++settingsRevisionRef.current;
     settingsRef.current = optimistic;
     setSettings(optimistic);
     const task = settingsSaveRef.current.catch(() => undefined).then(() => fastApi.updateSettings(optimistic));
     settingsSaveRef.current = task;
     try {
-      const saved = await task;
+      const saved = withLocalVoiceConfig(await task);
       if (settingsRevisionRef.current === revision) {
         settingsRef.current = saved;
         setSettings(saved);
@@ -853,6 +918,10 @@ export function useWorkspace() {
       return saved;
     } catch (error) {
       if (settingsRevisionRef.current === revision) {
+        if (includesVoiceConfig) {
+          if (previousLocalVoiceConfig === null) localStorage.removeItem(voiceConfigKey);
+          else localStorage.setItem(voiceConfigKey, previousLocalVoiceConfig);
+        }
         settingsRef.current = previous;
         setSettings(previous);
       }
@@ -901,24 +970,10 @@ export function useWorkspace() {
   }, []);
 
   const exportBackup = useCallback(async (parts: BackupPart[]) => {
-    const bundle = await fastApi.exportBackup(parts);
-    const clientData: Record<string, string> = { ...(bundle.client_data || {}) };
-    for (let index = 0; index < localStorage.length; index += 1) {
-      const key = localStorage.key(index);
-      if (!key || !(key === "atherloom-react:feature-spaces:v1" || key === "atherloom-react:theme"
-        || key.startsWith("atherloom-react:draft:") || key.startsWith("atherloom-react:worldbooks:"))) continue;
-      clientData[key] = localStorage.getItem(key) || "";
-    }
-    return { ...bundle, client_data: clientData };
+    return fastApi.exportBackup(parts);
   }, []);
   const restoreBackup = useCallback(async (bundle: BackupBundle, parts: BackupPart[]) => {
     const result = await fastApi.restoreBackup(bundle, parts);
-    for (const [key, value] of Object.entries(bundle.client_data || {})) {
-      if (!(key === "atherloom-react:feature-spaces:v1" || key === "atherloom-react:theme"
-        || key.startsWith("atherloom-react:draft:") || key.startsWith("atherloom-react:worldbooks:"))) continue;
-      localStorage.setItem(key, value);
-    }
-    window.dispatchEvent(new CustomEvent("atherloom:feature-spaces-restored"));
     await hydrate();
     return result;
   }, [hydrate]);

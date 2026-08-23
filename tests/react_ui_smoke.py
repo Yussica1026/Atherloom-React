@@ -88,6 +88,43 @@ NATIVE_MOCK = r"""
       let body;
       if (operation === "models") body = {models: ["mock-model", "mock-model-pro"]};
       else if (operation === "test") body = {ok: true, message: "连接成功，模型已响应"};
+      else if (String(request.system || "").includes("受限子代理")) {
+        body = {content: "子代理核对报告：边界与事实一致。", reasoning: "", model: request.model || "mock-model-pro", usage: {prompt_tokens: 4, completion_tokens: 3, total_tokens: 7}};
+      }
+      else if (String(request.system || "").includes("用户已经在 Atherloom 任务台明确批准")) {
+        body = {content: "自动唤醒回归留言。", reasoning: "", model: request.model || "mock-model-pro", usage: {prompt_tokens: 4, completion_tokens: 3, total_tokens: 7}};
+      }
+      else if (Array.isArray(request.tools) && JSON.stringify(request.messages || []).includes("subagent-tool-smoke")) {
+        body = {content: "子代理已经返回核对报告。", reasoning: "只采用受限报告", model: request.model || "mock-model-pro", usage: {prompt_tokens: 5, completion_tokens: 4, total_tokens: 9}};
+      }
+      else if (Array.isArray(request.tools) && request.tools.some(tool => tool.name === "atherloom_subagent_run")
+        && JSON.stringify(request.messages || []).includes("委托回归")
+        && !(request.messages || []).some(message => message.role === "tool")) {
+        const definition = request.tools.find(tool => tool.name === "atherloom_subagent_run");
+        const agentId = definition.input_schema.properties.agent_id.enum[0];
+        const args = {agent_id: agentId, task: "核对子代理回归资料的事实边界"};
+        const nativeCall = {id: "subagent-tool-smoke", type: "function", function: {name: "atherloom_subagent_run", arguments: JSON.stringify(args)}};
+        body = {
+          content: "", reasoning: "委托受限子代理核对", model: request.model || "mock-model-pro",
+          tool_calls: [{id: "subagent-tool-smoke", name: "atherloom_subagent_run", arguments: args, source: "native"}],
+          raw_assistant: {role: "assistant", content: null, tool_calls: [nativeCall]},
+          usage: {prompt_tokens: 6, completion_tokens: 3, total_tokens: 9},
+        };
+      }
+      else if (Array.isArray(request.tools) && request.tools.some(tool => tool.name === "atherloom_board_create")
+        && JSON.stringify(request.messages || []).includes("工具回归留言")
+        && !(request.messages || []).some(message => message.role === "tool")) {
+        const nativeCall = {id: "writing-tool-smoke", type: "function", function: {name: "atherloom_board_create", arguments: JSON.stringify({content: "工具回归留言", visible_to_user: true})}};
+        body = {
+          content: "", reasoning: "决定使用真实留言工具", model: request.model || "mock-model-pro",
+          tool_calls: [{id: "writing-tool-smoke", name: "atherloom_board_create", arguments: {content: "工具回归留言", visible_to_user: true}, source: "native"}],
+          raw_assistant: {role: "assistant", content: null, tool_calls: [nativeCall]},
+          usage: {prompt_tokens: 6, completion_tokens: 3, total_tokens: 9},
+        };
+      }
+      else if (Array.isArray(request.tools) && JSON.stringify(request.messages || []).includes("writing-tool-smoke")) {
+        body = {content: "已经通过真实工具把便利贴留好了。", reasoning: "工具结果确认已创建", model: request.model || "mock-model-pro", usage: {prompt_tokens: 5, completion_tokens: 4, total_tokens: 9}};
+      }
       else {
         chatCount += 1;
         body = {
@@ -103,6 +140,7 @@ NATIVE_MOCK = r"""
     },
     providerChatStream: (raw, callbackId) => {
       const request = JSON.parse(raw || "{}");
+      window.__lastProviderChatRequest = request;
       chatCount += 1;
       const content = chatCount === 1
         ? '这是第一版回答。<questions>[{"question":"你想继续哪个方向？","options":["继续细化","换个角度"]}]</questions>'
@@ -128,6 +166,8 @@ def assert_dialog_header_in_view(dialog) -> None:
     header_box = dialog.locator(".feature-hub-header").bounding_box()
     close_box = dialog.locator(".feature-hub-header > button").bounding_box()
     assert dialog_box and header_box and close_box
+    assert dialog_box["y"] >= -1, dialog_box
+    assert header_box["y"] >= -1, header_box
     assert header_box["y"] >= dialog_box["y"] - 1
     assert close_box["x"] + close_box["width"] <= dialog_box["x"] + dialog_box["width"] + 1
 
@@ -145,6 +185,9 @@ def run() -> None:
         page.on("dialog", lambda dialog: dialog.accept())
         page.goto("http://127.0.0.1:5173", wait_until="networkidle")
 
+        assert page.evaluate("document.documentElement.dataset.font") == "kai"
+        assert "Atherloom WenKai" in page.locator("body").evaluate("element => getComputedStyle(element).fontFamily")
+
         page.get_by_role("button", name="设置用户名").click()
         username_field = page.get_by_label("用户名", exact=True)
         username_field.wait_for()
@@ -154,6 +197,12 @@ def run() -> None:
         page.get_by_role("button", name="保存用户名").click()
         page.get_by_text("用户名已保存", exact=True).wait_for()
         page.locator(".theme-setting select").select_option("water")
+        font_select = page.get_by_label("正文字体")
+        assert font_select.locator("option").evaluate_all("nodes => nodes.map(node => node.value)") == ["kai", "song", "hei", "fangsong", "system"]
+        font_select.select_option("song")
+        assert page.evaluate("document.documentElement.dataset.font") == "song"
+        font_select.select_option("kai")
+        assert page.evaluate("localStorage.getItem('atherloom-react:font')") == "kai"
         page.get_by_role("button", name="API 与网关").click()
         page.get_by_role("button", name="添加第一条线路").click()
         page.get_by_label("显示名称").fill("本机测试线路")
@@ -170,8 +219,19 @@ def run() -> None:
 
         page.get_by_role("button", name="人格指令").click()
         page.get_by_label("助手名称").fill("隔离人格")
+        page.get_by_role("button", name="子代理", exact=True).click()
+        page.get_by_role("button", name="添加子代理").click()
+        subagent_card = page.locator(".subagent-config-card").first
+        subagent_card.get_by_label("名称").fill("资料核对员")
+        subagent_card.get_by_label("专长").fill("核对事实与边界，不做最终决定")
+        subagent_card.get_by_label("模型线路").select_option(label="本机测试线路 · mock-model-pro")
+        subagent_card.get_by_label("工作指令").fill("只核对本轮任务中的事实和冲突，返回简短报告，不调用工具。")
         page.get_by_role("button", name="保存人格").click()
         page.get_by_text("已保存「隔离人格」", exact=True).wait_for()
+        saved_subagents = page.evaluate("JSON.parse(localStorage.getItem('atherloom-react:standalone-state:v1')).personas.find(item => item.name === '隔离人格').config.subagents")
+        assert len(saved_subagents) == 1, saved_subagents
+        assert saved_subagents[0]["name"] == "资料核对员", saved_subagents
+        assert saved_subagents[0]["enabled"] is True, saved_subagents
         proactive = page.get_by_role("switch", name="允许助手主动提问")
         assert proactive.get_attribute("aria-checked") == "false"
         proactive.click()
@@ -179,6 +239,22 @@ def run() -> None:
         assert proactive.get_attribute("aria-checked") == "true"
         saved_settings = page.evaluate("JSON.parse(localStorage.getItem('atherloom-react:standalone-state:v1')).settings")
         assert saved_settings["proactive_questions"] is True
+
+        page.get_by_role("button", name="自动唤醒").click()
+        wake_editor = page.locator(".automation-task-editor")
+        wake_editor.get_by_label("任务名称").fill("自动唤醒回归")
+        wake_editor.get_by_label("模型线路").select_option(label="本机测试线路")
+        wake_editor.get_by_label("唤醒时交给 AI 的提示词").fill("留一句自动唤醒回归留言")
+        wake_editor.get_by_role("button", name="添加任务").click()
+        page.get_by_text("任务已保存；应用在前台打开时会按计划唤醒", exact=True).wait_for()
+        wake_task = page.evaluate("JSON.parse(localStorage.getItem('atherloom-react:automation:v1')).wake_tasks.find(item => item.name === '自动唤醒回归')")
+        assert wake_task["created_by"] == "user" and wake_task["approval"] == "approved" and wake_task["enabled"] is True, wake_task
+        wake_card = page.locator(".automation-task-card", has_text="自动唤醒回归")
+        wake_card.get_by_role("button", name="立即运行").click()
+        page.get_by_text("已交给本机调度", exact=False).wait_for()
+        page.wait_for_function("JSON.parse(localStorage.getItem('atherloom-react:automation:v1')).wake_tasks.some(item => item.name === '自动唤醒回归' && item.status === 'completed' && item.run_count === 1)")
+        wake_result = page.evaluate("JSON.parse(localStorage.getItem('atherloom-react:feature-spaces:v1')).board.find(item => item.automation_task_id)")
+        assert wake_result["content"] == "自动唤醒回归留言。", wake_result
 
         page.get_by_role("button", name="世界书").click()
         page.get_by_role("button", name="添加世界书").click()
@@ -217,6 +293,10 @@ def run() -> None:
         page.get_by_text("九维状态设置已保存", exact=True).wait_for()
         assert page.locator(".motivation-grid article").count() == 9
         page.get_by_role("button", name="关闭设置").click()
+        automation_sticky = page.locator(".board-wake-sticky", has_text="自动唤醒回归留言。")
+        automation_sticky.wait_for()
+        automation_sticky.get_by_role("button", name="收好").click()
+        automation_sticky.wait_for(state="detached")
 
         page.get_by_role("button", name="打开或关闭欲望与聊天状态").click()
         page.locator(".chat-status-card").get_by_text("隔离人格 的状态", exact=True).wait_for()
@@ -257,6 +337,16 @@ def run() -> None:
         page.get_by_role("button", name="从这里创建分支").click()
         page.locator(".conversation-title strong").filter(has_text="分支").wait_for()
         assert "分支" in page.locator(".conversation-title strong").inner_text()
+
+        composer.fill("请委托资料核对员检查这段委托回归资料")
+        page.get_by_role("button", name="发送").click()
+        page.get_by_text("子代理已经返回核对报告。", exact=True).wait_for()
+        page.get_by_text("资料核对员 · 已完成", exact=True).wait_for()
+        subagent_event = page.evaluate("""() => {
+          const state = JSON.parse(localStorage.getItem('atherloom-react:standalone-state:v1'));
+          return Object.values(state.messages).flat().find(row => row.content === '子代理已经返回核对报告。')?.tool_events?.[0];
+        }""")
+        assert subagent_event["type"] == "subagent" and subagent_event["tool_name"] == "资料核对员", subagent_event
 
         page.get_by_role("button", name="往来", exact=True).click()
         standalone_correspondence = page.get_by_role("dialog", name="往来")
@@ -311,24 +401,101 @@ def run() -> None:
         page.locator(".feature-hub-nav").get_by_role("button", name="一起读书").click()
         page.get_by_label("导入 PDF / TXT / Markdown").set_input_files({"name": "sample.txt", "mimeType": "text/plain", "buffer": b"Atherloom local reading smoke text."})
         page.get_by_text("Atherloom local reading smoke text.", exact=False).wait_for()
+        page.evaluate("""() => {
+          const state = JSON.parse(localStorage.getItem('atherloom-react:standalone-state:v1'));
+          const personaKey = state.personas[0].id;
+          const stamp = new Date(Date.now() - 60000).toISOString();
+          localStorage.removeItem('atherloom-react:writing-migration:legacy-v1');
+          localStorage.setItem(`atherloom:journals:${encodeURIComponent(personaKey)}`, JSON.stringify([{
+            id: 'legacy-journal-smoke', persona_key: personaKey, title: '旧版迁移日记', content: '旧日记正文仍在',
+            space: 'user', author: 'user', visible_to_user: true, visible_to_ai: false, created_at: stamp, updated_at: stamp
+          }, {
+            id: 'legacy-sealed-journal-smoke', persona_key: personaKey, title: '密封测试页', content: '这段正文不能进入公开生成',
+            space: 'ai', author: 'ai', visible_to_user: false, visible_to_ai: true, created_at: stamp, updated_at: stamp
+          }]));
+          localStorage.setItem(`atherloom:board:${encodeURIComponent(personaKey)}`, JSON.stringify([{
+            id: 'legacy-board-smoke', persona_key: personaKey, content: '旧留言正文仍在', author_role: 'user',
+            visible_to_user: true, visible_to_ai: false, created_at: stamp, updated_at: stamp
+          }]));
+          localStorage.setItem(`atherloom:dreams:${encodeURIComponent(personaKey)}`, JSON.stringify([{
+            id: 'legacy-dream-smoke', persona_key: personaKey, title: '旧版迁移梦境', raw_text: '旧梦境正文仍在',
+            kind: 'quarantined', claimed: false, created_at: stamp, updated_at: stamp
+          }]));
+          localStorage.setItem('atherloom:board_wakes', JSON.stringify([{
+            id: 'legacy-exhausted-wake', message_id: 'legacy-board-smoke', persona_key: personaKey,
+            provider_id: 'provider-legacy', due_at: stamp, status: 'pending', attempts: 3, created_at: stamp
+          }]));
+          const spaces = JSON.parse(localStorage.getItem('atherloom-react:feature-spaces:v1') || '{}');
+          spaces.boardWakes = [{
+            id: 'mirror-terminal-wake', message_id: 'legacy-board-smoke', persona_key: personaKey,
+            provider_id: 'provider-legacy', due_at: stamp, status: 'pending', attempts: 1, created_at: stamp
+          }, {
+            id: 'done-wins-wake', message_id: 'legacy-board-smoke', persona_key: personaKey,
+            provider_id: 'provider-legacy', due_at: stamp, status: 'done', attempts: 1,
+            created_at: stamp, completed_at: new Date().toISOString()
+          }];
+          localStorage.setItem('atherloom-react:feature-spaces:v1', JSON.stringify(spaces));
+          localStorage.setItem('atherloom-react:board-wakes:v1', JSON.stringify([{
+            id: 'mirror-terminal-wake', message_id: 'legacy-board-smoke', persona_key: personaKey,
+            provider_id: 'provider-legacy', due_at: stamp, status: 'done', attempts: 1,
+            created_at: stamp, completed_at: new Date().toISOString()
+          }, {
+            id: 'done-wins-wake', message_id: 'legacy-board-smoke', persona_key: personaKey,
+            provider_id: 'provider-legacy', due_at: new Date(Date.now() + 86400000).toISOString(),
+            status: 'error', attempts: 3, created_at: stamp, error: 'stale mirror retry'
+          }]));
+        }""")
         page.get_by_role("button", name="日记", exact=True).click()
+        page.get_by_text("旧版迁移日记", exact=True).wait_for()
+        wake_states = page.evaluate("""() => Object.fromEntries(
+          JSON.parse(localStorage.getItem('atherloom-react:feature-spaces:v1')).boardWakes.map(row => [row.id, row.status])
+        )""")
+        assert wake_states["legacy-exhausted-wake"] == "error", wake_states
+        assert wake_states["mirror-terminal-wake"] == "done", wake_states
+        assert wake_states["done-wins-wake"] == "done", wake_states
         page.get_by_label("你能否阅读").select_option("visible")
         page.get_by_role("button", name="让 TA 现在写一篇").click()
-        page.get_by_text("已写完", exact=False).wait_for()
+        page.get_by_text("已写入写作库", exact=False).wait_for()
         page.get_by_text("这是第 3 版回答。", exact=True).wait_for()
+        public_journal_system = page.evaluate("() => String(window.__lastProviderChatRequest?.system || '')")
+        assert "persona_visible_spaces" not in public_journal_system, public_journal_system
+        assert "密封测试页" not in public_journal_system, public_journal_system
         page.get_by_text("运行审计", exact=False).click()
         page.get_by_text("写作完成", exact=False).wait_for()
         page.get_by_role("button", name="留言板", exact=True).click()
+        page.get_by_text("旧留言正文仍在", exact=True).wait_for()
         page.get_by_label("留言正文").fill("这是一条本机回归留言。")
         page.get_by_role("button", name="贴到留言板").click()
         page.get_by_text("这是一条本机回归留言。", exact=True).wait_for()
         page.get_by_role("button", name="梦库", exact=True).click()
+        page.get_by_text("旧版迁移梦境", exact=True).wait_for()
+        dream_cards_before = page.locator(".dream-note").count()
         page.get_by_role("button", name="让 TA 做梦").click()
-        page.get_by_text("已收进梦库", exact=False).wait_for()
+        page.get_by_text("梦境草稿已经填好", exact=False).wait_for()
+        assert page.locator(".dream-note").count() == dream_cards_before
+        page.get_by_role("button", name="保存梦境").click()
+        page.get_by_text("梦境已保存并认领。", exact=True).wait_for()
+        assert page.locator(".dream-note").count() == dream_cards_before + 1
         page.get_by_text("这是第 4 版回答。", exact=True).wait_for()
+        assert page.evaluate("localStorage.getItem('atherloom:journals:' + encodeURIComponent(JSON.parse(localStorage.getItem('atherloom-react:standalone-state:v1')).personas[0].id)) !== null")
         page.screenshot(path=str(ARTIFACTS / "react-desktop.png"), full_page=True)
 
         page.get_by_role("button", name="关闭", exact=True).click()
+        composer.fill("请在留言板给我留一张公开便利贴，内容是工具回归留言")
+        page.get_by_role("button", name="发送").click()
+        page.get_by_text("已经通过真实工具把便利贴留好了。", exact=True).wait_for()
+        page.get_by_text("贴出留言 · 已完成", exact=True).wait_for()
+        tool_persistence = page.evaluate("""() => {
+          const state = JSON.parse(localStorage.getItem('atherloom-react:standalone-state:v1'));
+          const personaKey = state.personas[0].id;
+          const spaces = JSON.parse(localStorage.getItem('atherloom-react:feature-spaces:v1'));
+          const note = spaces.board.find(row => row.persona_key === personaKey && row.content === '工具回归留言');
+          const assistant = Object.values(state.messages).flat().find(row => row.role === 'assistant' && row.content === '已经通过真实工具把便利贴留好了。');
+          return {note, toolEvents: assistant?.tool_events || []};
+        }""")
+        assert tool_persistence["note"]["author"] == "ai", tool_persistence
+        assert tool_persistence["note"]["visible_to_user"] is True, tool_persistence
+        assert tool_persistence["toolEvents"][0]["name"] == "atherloom_board_create", tool_persistence
         page.evaluate("window.__cancelNextSave = true")
         page.get_by_role("button", name="导出脱敏 Markdown").click()
         page.get_by_text("导出失败：已取消保存", exact=True).wait_for()

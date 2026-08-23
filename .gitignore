@@ -11,6 +11,7 @@ __pycache__/
 .DS_Store
 Thumbs.db
 artifacts/
+docs/reference-screenshots/
 android/.gradle/
 android/local.properties
 android/app/build/

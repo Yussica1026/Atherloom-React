@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 from pathlib import Path
 from uuid import uuid4
 
@@ -22,6 +23,7 @@ persona_name = f"阿栈 · 验证人格-{run_id}"
 edited_persona_name = f"阿栈 · 已编辑-{run_id}"
 worldbook_name = f"雾港设定集-{run_id}"
 imported_worldbook_name = f"导入验证书-{run_id}"
+account_settings_name = re.compile(r"(设置用户名|打开账号与外观设置)$")
 
 
 def mock_chat(route: Route) -> None:
@@ -119,6 +121,11 @@ def wait_card_gone(page, title: str) -> None:
     )
 
 
+def open_account_settings(page) -> None:
+    page.locator(".sidebar").get_by_role("button", name=account_settings_name).click()
+    page.get_by_role("heading", name="外观", exact=True).wait_for()
+
+
 with sync_playwright() as playwright:
     browser = playwright.chromium.launch(channel="msedge", headless=True)
     page = browser.new_page(viewport={"width": 1440, "height": 960}, device_scale_factor=1)
@@ -157,8 +164,9 @@ with sync_playwright() as playwright:
     launch.wait_for(state="detached", timeout=3000)
     page.wait_for_load_state("networkidle")
     page.get_by_role("heading", name="今天想聊些什么？").wait_for()
-    page.get_by_role("button", name="打开设置").click()
-    page.get_by_role("heading", name="API 与网关").wait_for()
+    open_account_settings(page)
+    page.get_by_role("button", name="API 与网关", exact=True).click()
+    page.get_by_role("heading", name="API 与网关", exact=True).wait_for()
 
     delete_provider_card = card(page, seed_provider_name)
     delete_provider_card.get_by_role("button", name="删除").click()
@@ -231,7 +239,7 @@ with sync_playwright() as playwright:
     page.get_by_role("button", name="记忆", exact=True).click()
     field(persona_form, "摘要更新频率", "input").fill("12")
     set_switch(page, "参考历史聊天记录", False)
-    page.get_by_role("button", name="MCP", exact=True).click()
+    persona_form.get_by_role("button", name="MCP", exact=True).click()
     field(persona_form, "绑定 MCP 服务", "textarea").fill("safe-mcp")
     persona_form.get_by_role("button", name="保存人格").click()
     page.get_by_text(f"已保存「{persona_name}」", exact=True).wait_for()
@@ -283,7 +291,7 @@ with sync_playwright() as playwright:
         "version": 1,
         "worldbooks": [{"name": imported_worldbook_name, "description": "导入后删除", "enabled": True, "entries": []}],
     }, ensure_ascii=False), encoding="utf-8")
-    page.locator('input[type="file"][accept*="json"]').set_input_files(import_file)
+    page.locator('section[aria-labelledby="worldbooks-title"] input[type="file"]').set_input_files(import_file)
     page.locator("article.settings-list-card .settings-list-copy > strong").get_by_text(imported_worldbook_name, exact=True).wait_for()
     imported_card = card(page, imported_worldbook_name)
     imported_card.wait_for()
@@ -307,10 +315,7 @@ with sync_playwright() as playwright:
     page.get_by_text("恢复完成；恢复前快照：", exact=False).wait_for()
     page.wait_for_timeout(1200)
     page.wait_for_load_state("networkidle")
-    page.get_by_role("button", name="打开设置").click()
-    page.get_by_role("heading", name="API 与网关").wait_for()
-
-    page.get_by_role("button", name="外观", exact=True).click()
+    open_account_settings(page)
     swatches = page.locator(".theme-swatches")
     expected_themes = {
         "浅色": ("light", "#f7f6f2", "#c96442"),

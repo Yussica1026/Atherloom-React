@@ -56,7 +56,7 @@ npm run dev
 
 Android 客户端使用独立包名 `app.atherloom.react`，不会覆盖旧版 Atherloom。APK 内置 React 页面，默认使用本机模式：API Key 通过 Android 加密存储保管，设置和聊天数据留在当前设备，模型请求通过原生桥直接发往所填线路。
 
-当前固定签名版：[`v0.2.1 免登录直接下载 APK`](https://github.com/Yussica1026/Atherloom-React/releases/download/v0.2.1/Atherloom-React-Android-release.apk)。
+当前固定签名版：[`v0.2.2 免登录直接下载 APK`](https://github.com/Yussica1026/Atherloom-React/releases/download/v0.2.2/Atherloom-React-Android-release.apk)。
 
 需要共用现有 FastAPI/SQLite 时，可进入“设置 → 后端连接”填写电脑或服务器地址，例如 `http://192.168.1.20:8876`；清空地址并保存即可切回本机模式。详细说明见 [Android 构建说明](android/README.md)。
 

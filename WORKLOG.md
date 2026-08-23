@@ -1,6 +1,6 @@
 # Atherloom React 工作日志
 
-## 2026-08-23 · v0.2.3 语音、字体、写作与自主能力（发布候选，待 CI 固定签名与真机）
+## 2026-08-23 · v0.2.3 语音、字体、写作与自主能力（已发布，待真机）
 
 > 本版只发布已经完成并通过自动化回归的 React / Android 功能。长期世界第二阶段仍在旧后端工作树中单独开发，不进入本次 APK，也不推送旧 HTML / FastAPI 仓库；旧 `/api/games` 的代码和公开行为不因本次 React 发布而改变。
 
@@ -21,11 +21,15 @@
 
 后两项属于未进入本 APK 的 LongWorld 后续验收条件，不是 `v0.2.3` React 功能的完成声明。
 
-### 发布候选验证
+### 发布验证
 
 - `npm run typecheck` 通过；`tests/react_regression_contracts.py` 34 项、`android/tests/test_voice_contract.py` 4 项契约通过。
 - `tests/react_ui_smoke.py` 真浏览器移动端流程通过，覆盖自动唤醒、人格子代理配置、按次授权、委托执行、写作空间及关键浮层层级；`tests/react_voice_smoke.py`、Android Standalone 与 bridge 冒烟均通过。
-- production build 通过（312 个模块）；`dist` 中已核对 v0.2.3 Service Worker、文楷字体及随包 OFL / NOTICE。固定签名 GitHub Actions、公开 APK 哈希 / 包信息 / 证书核验仍待本节后续补录；真实 Android 权限、厂商识别、音频焦点和真实 MiniMax Key 仍必须在手机上验收。
+- production build 通过（312 个模块）；`dist` 中已核对 v0.2.3 Service Worker、文楷字体及随包 OFL / NOTICE。`git diff --check` 通过，发布文件敏感信息扫描只命中测试假 Key，没有密钥、数据库或签名材料。
+- 功能提交 `b136ec4` 已推送至 `feat/android-apk`；分支构建 `32641101991` 与 `v0.2.3` 标签固定签名构建 `32641269448` 均成功，公开 Release 为 <https://github.com/Yussica1026/Atherloom-React/releases/tag/v0.2.3>。
+- 已从公开 Release 重新下载四个附件并复核：APK `11,687,725` 字节，包名 `app.atherloom.react`，versionCode `9`，versionName `0.2.3-react-release`；APK SHA-256 为 `3f40b575ebc234991563843cc8603fe400f4a0877bf2f53e219c4a04f1d1f3b2`，与公开 `.sha256` 一致。
+- APK v2 签名验证通过，固定证书 SHA-256 为 `c31ec8be3956258e35b852545d43607ea87cbeefa805593633fa0e522033940a`；压缩包内已确认文楷字体、OFL-1.1 与 NOTICE。免登录直链：<https://github.com/Yussica1026/Atherloom-React/releases/download/v0.2.3/Atherloom-React-Android-release.apk>。
+- 上述自动化与签名证据不替代真实设备验收；Android 权限弹窗、厂商识别、音频焦点 / 耳机、连续多轮和真实 MiniMax Key 仍必须在手机上测试。
 
 ## 2026-08-23 · AI 文字游戏 / 长期世界架构调研（第一阶段，仅分析）
 
@@ -79,7 +83,7 @@ Player action / AICharacter ActionIntent
 - 尚未新增数据库表、API、前端入口、世界卡、提示词、测试、构建产物或 APK，也没有执行代码迁移。
 - 等用户确认进入第二阶段后，优先实现版本化 Schema、领域事件、规则不变量、事件重放、视角脱敏和并发/幂等测试，再接入模型编排与 UI。
 
-## 2026-08-23 · 楷体默认与日记 / 留言板 / 梦库语义补齐（已并入 v0.2.3 发布候选）
+## 2026-08-23 · 楷体默认与日记 / 留言板 / 梦库语义补齐（已并入 v0.2.3，待真机）
 
 > 本节是 v0.2.2 发布后的开发过程记录；当前发布状态与最终验证以顶部 `v0.2.3` 节为准，真实 Android 手机验收仍未完成。
 
@@ -136,7 +140,7 @@ Player action / AICharacter ActionIntent
 - 旧 FastAPI 在普通聊天请求中会自动附带所有对 AI 可见日记，也没有无副作用草稿接口。React 因此在服务器模式禁用全部立即 / 定时 AI 日记生成；用户手写日记 CRUD 和旧 FastAPI 主聊天中已有的受权限控制日记 / 留言工具写入仍可用。待后端提供显式、安全、无副作用的草稿能力后再恢复 React AI 日记生成。
 - 往来的联系人和信件继续使用既有 FastAPI 路径；完全本机的会客厅不能创建或读取真实服务器归档，需要连接后端后申请。真实 Relay 房间、提题、投票、计时、人格唤醒与归档状态机仍待迁移。
 
-## 2026-08-23 · Android 语音稳定架构与 MiniMax TTS（已并入 v0.2.3 发布候选）
+## 2026-08-23 · Android 语音稳定架构与 MiniMax TTS（已并入 v0.2.3，待真机）
 
 > 本节是 v0.2.2 发布后的开发过程记录；当前发布状态与最终验证以顶部 `v0.2.3` 节为准，真实 Android 手机验收仍未完成。
 
@@ -168,7 +172,7 @@ Player action / AICharacter ActionIntent
 - `android/tests/test_voice_contract.py` 覆盖 Manifest、可信来源音频授权、识别控制器生命周期、MiniMax 加密存储、固定域名、响应校验、播放器和取消契约。
 - 既有 `tests/react_ui_smoke.py`、`scripts/android_standalone_test.py` 与 `scripts/android_bridge_test.py` 均通过。UI 回归同时发现并修复会客厅本机配置保存成功提示会被配置同步 effect 立即清空的问题；邀请码仍会在配置变更后失效。
 - 上述是浏览器与静态契约验证，不等同于真机。仍需真实 Android 验证权限首次授予/拒绝/永久拒绝、厂商识别服务、连续多轮、前后台、音频焦点/耳机，以及真实 MiniMax Key、音色、限流、弱网和余额错误。
-- v0.2.3 标签前仍需执行 Android Gradle 固定签名构建并核对公开附件、包信息与证书；真实手机回归继续作为发布后的明确待验边界。
+- v0.2.3 已完成 Android Gradle 固定签名构建与公开附件、包信息、哈希和证书核验；真实手机回归继续作为发布后的明确待验边界。
 
 ## 2026-08-23 · v0.2.2 截图复原、主题套色与真实往来边界（已发布，待真机）
 

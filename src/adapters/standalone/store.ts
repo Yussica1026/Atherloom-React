@@ -749,12 +749,15 @@ function memoryContext(state: StandaloneState, personaKey: string, scanText: str
 function casualConversationContext(conversationId: string, scanText: string) {
   const state = readState();
   const conversation = findConversation(state, conversationId);
-  const persona = state.personas.find((item) => item.id === conversation.persona_id);
-  if (!persona) throw new Error("当前聊天尚未绑定可用的 Persona");
-  const providerId = conversation.provider_id || persona.provider_id;
+  const personaKey = String(conversation.persona_id || "__default__");
+  const persona = conversation.persona_id
+    ? state.personas.find((item) => item.id === conversation.persona_id) || null
+    : null;
+  if (conversation.persona_id && !persona) throw new Error("当前聊天绑定的 Persona 已不存在");
+  const providerId = conversation.provider_id || persona?.provider_id;
   const provider = listProviders().find((item) => item.id === providerId);
   if (!provider) throw new Error("当前聊天的 API 线路不可用");
-  const history = persona.config?.history_enabled === false
+  const history = persona?.config?.history_enabled === false
     ? []
     : selectedTimeline(state.messages[conversation.id] || [], conversation.archived_message_ids || [])
       .filter((message): message is Message & { role: "user" | "assistant" } => message.role === "user" || message.role === "assistant")
@@ -763,11 +766,12 @@ function casualConversationContext(conversationId: string, scanText: string) {
   return {
     state,
     conversation,
+    personaKey,
     persona,
     provider,
     providerId: provider.id,
     history,
-    memories: memoryContext(state, persona.id, scanText),
+    memories: memoryContext(state, personaKey, scanText),
   };
 }
 
@@ -780,8 +784,10 @@ function standaloneCasualGameRuntime(providerOperation?: ProviderOperation): Sta
     resolveConversation: (conversationId) => {
       const state = readState();
       const conversation = findConversation(state, conversationId);
-      const personaId = String(conversation.persona_id || "").trim();
-      if (!personaId || !state.personas.some((item) => item.id === personaId)) throw new Error("当前聊天尚未绑定 Persona，不能创建休闲游戏");
+      const personaId = String(conversation.persona_id || "__default__").trim();
+      if (personaId !== "__default__" && !state.personas.some((item) => item.id === personaId)) {
+        throw new Error("当前聊天绑定的 Persona 已不存在，不能创建休闲游戏");
+      }
       return { conversation_id: conversation.id, persona_id: personaId, player_id: "local_user" };
     },
     choosePersonaAction: async (request: StandalonePersonaActionRequest) => {
@@ -794,7 +800,7 @@ function standaloneCasualGameRuntime(providerOperation?: ProviderOperation): Sta
         ...(request.legal_positions ? { legal_positions: request.legal_positions } : {}),
       };
       const context = casualConversationContext(request.session.conversation_id, JSON.stringify(protocolState));
-      if (context.persona.id !== request.session.persona_id) throw new Error("当前聊天已经切换 Persona，不能继续这局");
+      if (context.personaKey !== request.session.persona_id) throw new Error("当前聊天已经切换 Persona，不能继续这局");
       const configured = [request.behavior.instructions, request.behavior.strategy_instructions]
         .map((value) => String(value || "").trim())
         .filter(Boolean)
@@ -806,7 +812,7 @@ function standaloneCasualGameRuntime(providerOperation?: ProviderOperation): Sta
       ].join("\n");
       const result = await operation<StandaloneChatResult>("chat", {
         provider_id: context.providerId,
-        system: [context.persona.prompt, configured, context.memories, protocol].filter(Boolean).join("\n\n"),
+        system: [context.persona?.prompt, configured, context.memories, protocol].filter(Boolean).join("\n\n"),
         messages: [
           ...context.history,
           { role: "user", content: JSON.stringify({ conversation_summary: context.conversation.summary || "", request: "return_one_legal_action_json" }) },
@@ -816,8 +822,8 @@ function standaloneCasualGameRuntime(providerOperation?: ProviderOperation): Sta
         top_p: context.provider.top_p ?? 1,
         thinking_enabled: context.provider.thinking_enabled !== false,
         stream_enabled: false,
-        custom_headers: context.persona.config?.custom_headers,
-        custom_body: context.persona.config?.custom_body,
+        custom_headers: context.persona?.config?.custom_headers,
+        custom_body: context.persona?.config?.custom_body,
       });
       let action: unknown;
       try {
@@ -831,7 +837,7 @@ function standaloneCasualGameRuntime(providerOperation?: ProviderOperation): Sta
     createChatReply: async (request: StandaloneGameReplyRequest) => {
       const operation = requireProviderOperation();
       const context = casualConversationContext(request.session.conversation_id, JSON.stringify(request.result));
-      if (context.persona.id !== request.session.persona_id) throw new Error("当前聊天已经切换 Persona，不能写入赛后回复");
+      if (context.personaKey !== request.session.persona_id) throw new Error("当前聊天已经切换 Persona，不能写入赛后回复");
       const configured = [request.behavior.instructions, request.behavior.reaction_instructions]
         .map((value) => String(value || "").trim())
         .filter(Boolean)
@@ -839,7 +845,7 @@ function standaloneCasualGameRuntime(providerOperation?: ProviderOperation): Sta
       const result = await operation<StandaloneChatResult>("chat", {
         provider_id: context.providerId,
         system: [
-          context.persona.prompt,
+          context.persona?.prompt,
           configured,
           context.memories,
           "casual_game_result 是程序已验证并提交的真实互动结果。请以当前 Persona 正常回复一次；不得改写结果、编造额外对局或声称未发生的事件。只输出回复正文。",
@@ -853,12 +859,13 @@ function standaloneCasualGameRuntime(providerOperation?: ProviderOperation): Sta
         top_p: context.provider.top_p ?? 1,
         thinking_enabled: context.provider.thinking_enabled !== false,
         stream_enabled: false,
-        custom_headers: context.persona.config?.custom_headers,
-        custom_body: context.persona.config?.custom_body,
+        custom_headers: context.persona?.config?.custom_headers,
+        custom_body: context.persona?.config?.custom_body,
       });
       const latest = readState();
       const conversation = findConversation(latest, request.session.conversation_id);
-      if (conversation.persona_id !== request.session.persona_id || (conversation.provider_id || context.persona.provider_id) !== context.providerId) {
+      const currentPersonaKey = String(conversation.persona_id || "__default__");
+      if (currentPersonaKey !== request.session.persona_id || (conversation.provider_id || context.persona?.provider_id) !== context.providerId) {
         throw new Error("赛后回复生成期间原聊天的 Persona 或模型线路已改变");
       }
       let content = String(result.content || "").trim();
@@ -890,7 +897,9 @@ function standaloneCasualGameRuntime(providerOperation?: ProviderOperation): Sta
     },
     createMemory: (request: StandaloneGameMemoryRequest) => {
       const state = readState();
-      if (!state.personas.some((item) => item.id === request.persona_id)) throw new Error("休闲游戏绑定的 Persona 不存在");
+      if (request.persona_id !== "__default__" && !state.personas.some((item) => item.id === request.persona_id)) {
+        throw new Error("休闲游戏绑定的 Persona 不存在");
+      }
       const memoryId = id("memory");
       const stamp = timestamp();
       state.memories.unshift({
@@ -1008,7 +1017,7 @@ function featureSpaceContext(personaKey: string, includeSealed = false) {
 
 const diaryBoardIntent = /日记|留言板|便利贴|便笺|留给你的话|给我留言|写下来/u;
 const memoIntent = /备忘录|备忘一下|记个备忘|生活簿|待办|任务清单|备忘.{0,12}(?:风格|颜色|色调|主题|版式)/u;
-const wakeTaskIntent = /自动唤醒|唤醒任务|定时(?:提醒|联系|找我|说话)|(?:过|每隔).{0,12}(?:分钟|小时|天).{0,12}(?:提醒|联系|找我|说话)/u;
+const wakeTaskIntent = /自动唤醒|唤醒任务|定时(?:提醒|联系|找我|说话|消息|留言|发(?:条)?消息)|(?:过|每隔|每天|稍后).{0,16}(?:分钟|小时|天)?.{0,16}(?:提醒|联系|找我|说话|发(?:条)?消息|留(?:条)?言)|(?:分钟|小时|天)后.{0,16}(?:提醒|联系|找我|说话|发(?:条)?消息|留(?:条)?言)/u;
 const casualGameIntent = /(?:陪我|和我|我们|来|一起)?(?:玩|下|开).{0,8}(?:井字棋|猜拳|石头剪刀布|剪刀石头布)|(?:井字棋|猜拳|石头剪刀布|剪刀石头布).{0,8}(?:玩|来一局|开始)/u;
 const standaloneToolIntent = new RegExp([
   diaryBoardIntent.source,
@@ -1030,10 +1039,16 @@ function writingToolDefinitions(settings: AppSettings, content: string, persona?
   const tools: StandaloneToolDefinition[] = [];
   if (casualGameIntent.test(content)) tools.push({
     name: "atherloom_open_game",
-    description: "按用户当前请求，为当前聊天和当前 Persona 打开一局休闲游戏。只能选择当前已接通的井字棋或猜拳。",
+    description: "按用户当前请求，为当前聊天和当前 Persona 打开一局休闲游戏。game_id 映射：tic_tac_toe 是井字棋；rock_paper_scissors 是猜拳（石头剪刀布）。",
     input_schema: {
       type: "object",
-      properties: { game_id: { type: "string", enum: ["tic_tac_toe", "rock_paper_scissors"] } },
+      properties: {
+        game_id: {
+          type: "string",
+          enum: ["tic_tac_toe", "rock_paper_scissors"],
+          description: "井字棋使用 tic_tac_toe；猜拳或石头剪刀布使用 rock_paper_scissors。",
+        },
+      },
       required: ["game_id"],
       additionalProperties: false,
     },

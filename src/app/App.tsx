@@ -554,8 +554,8 @@ export default function App() {
       {featureSpace === "games" ? <Suspense fallback={<div className="dialog-layer"><section className="compact-dialog"><p>正在打开休闲游戏…</p></section></div>}><GameHub
         conversationId={workspace.currentId}
         conversationTitle={workspace.currentConversation?.title || "当前对话"}
-        personaId={workspace.currentConversation?.persona_id || workspace.personaId}
-        personaName={workspace.personas.find((item) => item.id === (workspace.currentConversation?.persona_id || workspace.personaId))?.name || "当前人格"}
+        personaId={workspace.currentConversation?.persona_id || workspace.personaId || "__default__"}
+        personaName={workspace.personas.find((item) => item.id === (workspace.currentConversation?.persona_id || workspace.personaId))?.name || "默认人格"}
         onClose={() => setFeatureSpace(null)}
         onOpenGame={(effect) => {
           setFeatureSpace(null);
@@ -604,7 +604,7 @@ export default function App() {
       {activeGame ? <Suspense fallback={<div className="dialog-layer"><section className="compact-dialog" role="status"><p>正在铺开棋盘…</p></section></div>}><GameOverlay
         key={activeGame.session_id}
         effect={activeGame}
-        personaName={workspace.personas.find((item) => item.id === activeGame.persona_id)?.name || "当前人格"}
+        personaName={workspace.personas.find((item) => item.id === activeGame.persona_id)?.name || "默认人格"}
         conversationTitle={workspace.conversations.find((item) => item.id === activeGame.conversation_id)?.title || workspace.currentConversation?.title || "原对话"}
         onClose={() => setActiveGame(null)}
         onConversationUpdated={workspace.refreshConversationMessages}

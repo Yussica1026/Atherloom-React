@@ -78,8 +78,8 @@ jobs:
           grep -Fqi 'c31ec8be3956258e35b852545d43607ea87cbeefa805593633fa0e522033940a' android/apk-signature.txt
           "$AAPT" dump badging "$APK" | tee android/apk-badging.txt
           grep -Fq "package: name='app.atherloom.react'" android/apk-badging.txt
-          grep -Fq "versionCode='11'" android/apk-badging.txt
-          grep -Fq "versionName='0.2.5-react-release'" android/apk-badging.txt
+          grep -Fq "versionCode='12'" android/apk-badging.txt
+          grep -Fq "versionName='0.2.6-rc1-react-release'" android/apk-badging.txt
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             EXPECTED_TAG="v$(node -p 'require("./package.json").version')"
             test "$GITHUB_REF_NAME" = "$EXPECTED_TAG"
@@ -109,4 +109,4 @@ jobs:
             android/apk-signature.txt \
             android/apk-badging.txt \
             --title "Atherloom React $GITHUB_REF_NAME" \
-            --notes "Atherloom React Android 固定签名版。v0.2.5 打通 Android 完全离线 Standalone 休闲游戏：侧栏可见入口、井字棋、猜拳、当前 Persona 模型回合、赛后回到原聊天及可选长期记忆均无需电脑后端；聊天中也可由当前 Persona 调用 open_game。长期世界仍需连接支持对应 API 的 FastAPI。独立包名 app.atherloom.react，不会覆盖旧版 Atherloom；已安装固定签名版的设备可直接覆盖升级并保留应用数据。"
+            --notes "Atherloom React Android 固定签名候选版。v0.2.6-rc1 修复默认人格无法打开休闲游戏，并补齐游戏 ID 与定时消息工具提示。独立包名 app.atherloom.react；已安装固定签名版的设备可直接覆盖升级并保留应用数据。"

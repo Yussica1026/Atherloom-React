@@ -18,6 +18,7 @@ class ReactCasualGamesContracts(unittest.TestCase):
             "src/features/games/types.ts",
             "src/features/games/api.ts",
             "src/features/games/GameRegistry.ts",
+            "src/features/games/GameHub.tsx",
             "src/features/games/GameOverlay.tsx",
             "src/features/games/games.css",
             "src/features/games/hooks/useGameSession.ts",
@@ -26,7 +27,23 @@ class ReactCasualGamesContracts(unittest.TestCase):
         )
         for relative in expected:
             self.assertTrue((ROOT / relative).is_file(), relative)
-        self.assertNotIn("casual-game", source("src/adapters/standalone/store.ts").lower())
+        standalone = source("src/adapters/standalone/store.ts")
+        engine = source("src/adapters/standalone/casualGames.ts")
+        self.assertIn("requestStandaloneCasualGameJson", standalone)
+        self.assertIn('name: "atherloom_open_game"', standalone)
+        self.assertIn('"tic_tac_toe"', engine)
+        self.assertIn('"rock_paper_scissors"', engine)
+        self.assertIn("user_choice_committed", engine)
+
+    def test_visible_hub_starts_and_reopens_same_persona_games(self) -> None:
+        hub = source("src/features/games/GameHub.tsx")
+        app = source("src/app/App.tsx")
+        sidebar = source("src/features/shell/Sidebar.tsx")
+        self.assertIn("casualGameApi.createSession", hub)
+        self.assertIn("casualGameApi.listSessions", hub)
+        self.assertIn("session.persona_id === personaId", hub)
+        self.assertIn('featureSpace === "games"', app)
+        self.assertIn('onOpenSpace("games")', sidebar)
 
     def test_only_live_tool_effects_open_the_overlay(self) -> None:
         workspace = source("src/features/workspace/useWorkspace.ts")

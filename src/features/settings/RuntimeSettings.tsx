@@ -87,7 +87,7 @@ export function RuntimeSettings(props: RuntimeSettingsProps) {
       <article><strong>工具与线路</strong><small>{providers.filter((item) => item.enabled !== false).length} 条模型线路 · {worldbooks.filter((item) => item.enabled !== false).length} 本世界书</small><button type="button" onClick={onOpenTools}>检查权限</button></article>
     </div>
     <div className="settings-edit-card runtime-diagnostic"><h4>数据健康</h4><p>当前人格：{personaName}</p><p>记忆：{memoryStats.active} 当前 · {memoryStats.candidate} 待确认 · {memoryStats.archived} 归档 · {memoryStats.trash} 回收站</p><p>模型线路：{providers.filter((item) => item.enabled !== false).length} 条可用 · MCP：{mcpServers.filter((item) => item.enabled !== false).length} 个已启用</p><button type="button" onClick={() => void load()}>重新检查</button></div>
-    <div className="settings-edit-card runtime-diagnostic"><h4>版本与运行方式</h4><p>Atherloom React 0.2.4 · Android versionCode 10</p><p>{window.AtherloomNative ? "Android WebView 本机/后端双模式" : "浏览器 / 可安装 PWA；离线壳不会强制刷新正在进行的聊天。"}</p></div>
+    <div className="settings-edit-card runtime-diagnostic"><h4>版本与运行方式</h4><p>Atherloom React 0.2.5 · Android versionCode 11</p><p>{window.AtherloomNative ? "Android WebView 本机/后端双模式" : "浏览器 / 可安装 PWA；离线壳不会强制刷新正在进行的聊天。"}</p></div>
     <form className="settings-form settings-edit-card" onSubmit={(event) => { event.preventDefault(); void saveMotivation(); }}>
       <div className="span-all"><h4>人格九维状态</h4><p className="form-hint">启用后，每轮真实对话只更新当前人格的驱动，并作为行为参考注入；它不能绕过任何工具权限。</p></div>
       <label className="check-row"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /><span>启用九维状态</span></label>

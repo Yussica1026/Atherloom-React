@@ -1,5 +1,17 @@
 # Atherloom React 工作日志
 
+## 2026-08-25 · v0.2.5 Android Standalone 休闲游戏（待固定签名发布）
+
+> 修正 v0.2.4 只有 FastAPI Casual Games、Android 本机模式不可用的问题。本轮完成可见入口与完整本地链路；不再把“代码进入 APK”当成手机可用。
+
+- 新增侧栏“休闲游戏”与独立 GameHub，只开放已经接通的井字棋和猜拳；可开始新局，也可重新打开当前聊天里收起的 active Session。
+- 新增独立 Standalone Casual Games store 与确定性规则引擎，支持 Session、revision、幂等动作、可信 Result、放弃、赛后回复、可选记忆；未把领域状态继续塞进全局 StandaloneState。
+- 当前 Conversation 决定 Persona；每个 Persona 回合重新读取该聊天当前 Provider/model、Persona prompt、聊天上下文与同 Persona 相关记忆。模型只选择合法动作，程序判定回合与胜负。
+- 猜拳用户选择在 Persona 出手前只公开 `user_choice_committed=true`；赛后才同时揭示。游戏结果写回原聊天，记忆默认询问，批准后以 `casual_game / real_interaction` provenance 写入原 Persona。
+- Standalone 聊天新增原生结构化 `atherloom_open_game`，支持“陪我玩井字棋 / 我们来猜拳”等自然语言请求；Session 使用源消息与 game id 幂等创建。
+- 手机 390×844 Playwright 冒烟已通过：GameHub 开局、井字棋完整胜局、猜拳隐藏选择、赛后原聊天回复、同 Persona 记忆、聊天工具开局、收起后继续。
+- `npm run build` 通过；React/Android 静态契约 55 项通过。另 1 项既有纯 Java 测试在本机受沙箱拒绝启动 `javac`，未涉及本轮代码，交由 GitHub Actions 发布门禁执行。
+
 ## 2026-08-25 · v0.2.4 固定签名版（已发布，待真机）
 
 > 本版合并已经完成的 Direct Provider 明文误配防护、长期世界 React 客户端，以及 Casual Games 的井字棋与猜拳同 Persona 链路。发布范围只包含 `Atherloom-React`；旧 HTML / FastAPI 仓库、本地数据库和私人日记均不进入 GitHub 或 APK。

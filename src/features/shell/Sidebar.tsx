@@ -61,11 +61,12 @@ function groupConversations(conversations: Conversation[]) {
   return result;
 }
 
-type SpaceIconName = "world" | "favorite" | "life" | "mail" | "create" | "writing" | "reading" | "cinema" | "listening" | "roleplay" | "journal" | "board" | "dream";
+type SpaceIconName = "world" | "game" | "favorite" | "life" | "mail" | "create" | "writing" | "reading" | "cinema" | "listening" | "roleplay" | "journal" | "board" | "dream";
 
 function SpaceIcon({ name }: { name: SpaceIconName }) {
   const common = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
   if (name === "world") return <svg {...common}><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17M12 3.5c2.4 2.5 3.6 5.3 3.6 8.5S14.4 18 12 20.5C9.6 18 8.4 15.2 8.4 12S9.6 6 12 3.5Z" /><circle cx="17.4" cy="7.2" r="1.4" fill="currentColor" stroke="none" /></svg>;
+  if (name === "game") return <svg {...common}><path d="M5 5h14v14H5zM9.7 5v14M14.3 5v14M5 9.7h14M5 14.3h14" /><path d="m6.6 7 1.5 1.5M8.1 7 6.6 8.5" /><circle cx="16.7" cy="16.7" r="1.1" /></svg>;
   if (name === "favorite") return <svg {...common}><path d="m12 3 2.55 5.6 6.05.7-4.48 4.1 1.2 6-5.32-3-5.32 3 1.2-6L3.4 9.3l6.05-.7L12 3Z" /></svg>;
   if (name === "life") return <svg {...common}><rect x="4" y="3.5" width="16" height="17" rx="1.5" /><path d="M8 4v16M12 4v16M16 4v16" /></svg>;
   if (name === "mail") return <svg {...common}><rect x="3" y="5" width="18" height="14" rx="1.5" /><path d="m4 7 8 6 8-6" /><circle cx="12" cy="13" r="1.4" fill="currentColor" stroke="none" /></svg>;
@@ -258,6 +259,7 @@ export function Sidebar({
           新对话
         </button>
         <nav className="sidebar-feature-list" aria-label="功能空间">
+          <button type="button" onClick={() => onOpenSpace("games")}><span className="sidebar-space-icon"><SpaceIcon name="game" /></span>休闲游戏</button>
           <button type="button" onClick={() => onOpenSpace("longworld")}><span className="sidebar-space-icon"><SpaceIcon name="world" /></span>长期世界</button>
           <button type="button" onClick={() => onOpenSpace("favorites")}><span className="sidebar-space-icon"><SpaceIcon name="favorite" /></span>珍藏</button>
           <button type="button" onClick={() => onOpenSpace("life")}><span className="sidebar-space-icon"><SpaceIcon name="life" /></span>生活簿</button>

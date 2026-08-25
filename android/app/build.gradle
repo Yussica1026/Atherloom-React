@@ -8,8 +8,8 @@ android {
         applicationId 'app.atherloom.react'
         minSdk 26
         targetSdk 35
-        versionCode 10
-        versionName '0.2.4-react-release'
+        versionCode 11
+        versionName '0.2.5-react-release'
     }
 
     signingConfigs {

@@ -5,7 +5,7 @@ import { isStandaloneAndroid } from "../../adapters/standalone/store";
 import type { BoardRecord, DreamRecord, Favorite, JournalRecord, Persona, Provider, Worldbook } from "../../domain/types";
 import type { SettingsTab } from "../settings/SettingsPanel";
 
-export type FeatureSpace = "longworld" | "favorites" | "life" | "correspondence" | "reading" | "cinema" | "listening" | "roleplay" | "journal" | "board" | "dream";
+export type FeatureSpace = "longworld" | "games" | "favorites" | "life" | "correspondence" | "reading" | "cinema" | "listening" | "roleplay" | "journal" | "board" | "dream";
 
 interface BaseEntry { id: string; persona_key: string; created_at: string; updated_at: string }
 interface JournalEntry extends BaseEntry { title: string; content: string; space: "user" | "shared" | "ai"; author: "user" | "ai"; visible_to_user: boolean; visible_to_ai: boolean; parlor_id?: string | null; archive_status?: string | null }

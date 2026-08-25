@@ -111,7 +111,15 @@ export interface CasualGameActionResponse<State = Record<string, unknown>> {
 export interface CasualGameBehaviorConfig {
   persona_id: string;
   game_id: CasualGameId;
+  instructions?: string | null;
+  strategy_instructions?: string | null;
+  reaction_instructions?: string | null;
+  memory_instructions?: string | null;
   memory_mode: "off" | "ask" | "auto";
+}
+
+export interface CasualGameSessionList {
+  sessions: Array<CasualGameSession<RegisteredCasualGameState>>;
 }
 
 export interface CasualGameChatReply {

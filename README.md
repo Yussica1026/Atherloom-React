@@ -25,6 +25,7 @@ Atherloom React 是现有 Atherloom 前端的组件化重建。它保留原来�
 - 人格工作区聊天隔离：专属线路、继续/新建启动策略、每会话草稿、切换保护、重命名、置顶、星标、归档、消息搜索与会话删除。
 - 五类脱敏完整备份、选择性恢复、恢复前快照，以及 Android 系统文件保存/选择器。
 - Android 无需电脑后端即可使用本机模式：API Key 进入系统加密存储，设置、人格、世界书、会话和消息保存在本机，模型请求由原生网络桥直连；也可主动切换到 FastAPI 服务器模式。
+- 休闲游戏在 Android 本机模式可直接使用：侧栏打开井字棋或猜拳，也可在聊天中让当前 Persona 调用游戏；对局沿用同一 Persona、模型线路和记忆，结束后回到原聊天。
 - 消息复制、珍藏、修改、重新 Roll、回答版本切换、分支、删除单版本/全部版本，以及脱敏 Markdown 导出。
 - 自动总结、Token/轮数压缩、主动压缩、记忆生命周期、搜索与工具权限、MCP 管理、九维动机、右上角人格状态卡和数据健康。
 - 图片/PDF/文本附件、结构化问题选项卡、快捷短语、会话世界书、输入状态，以及适配器化语音通话：Android 原生/浏览器系统识别输入，系统或 MiniMax TTS 输出；MiniMax 当前只承担 TTS，真实 Android 手机仍待验收。
@@ -32,7 +33,7 @@ Atherloom React 是现有 Atherloom 前端的组件化重建。它保留原来�
 - 用户可查看、修改、批准和停用的自动唤醒任务，以及按人格隔离、按次授权的子代理委托；任务只在应用前台运行，应用关闭后于下次打开补做，不冒充系统后台常驻服务。
 - 可安装 PWA 离线壳，以及 Android 系统返回键浮层层级。
 
-完整范围见 [React 迁移总表](docs/MIGRATION_INVENTORY.md)，旧 HTML 功能与历史错误逐项核对见 [功能对照审计](docs/LEGACY_PARITY_AUDIT.md)，语音输入、单轮状态机、Android 桥和 MiniMax 密钥边界见 [语音架构](docs/VOICE_ARCHITECTURE.md)，本轮实现记录见 [工作日志](WORKLOG.md)。云芽庭院、全部游戏和 AI 会客厅按用户要求暂不迁移，不以空壳入口冒充完成。
+完整范围见 [React 迁移总表](docs/MIGRATION_INVENTORY.md)，旧 HTML 功能与历史错误逐项核对见 [功能对照审计](docs/LEGACY_PARITY_AUDIT.md)，语音输入、单轮状态机、Android 桥和 MiniMax 密钥边界见 [语音架构](docs/VOICE_ARCHITECTURE.md)，本轮实现记录见 [工作日志](WORKLOG.md)。云芽庭院、未列入当前范围的其他游戏和 AI 会客厅暂不迁移，不以空壳入口冒充完成。
 
 ## 本地运行
 
@@ -57,9 +58,9 @@ npm run dev
 
 Android 客户端使用独立包名 `app.atherloom.react`，不会覆盖旧版 Atherloom。APK 内置 React 页面，默认使用本机模式：API Key 通过 Android 加密存储保管，设置和聊天数据留在当前设备，模型请求通过原生桥直接发往所填线路。
 
-当前固定签名版：[`v0.2.3 免登录直接下载 APK`](https://github.com/Yussica1026/Atherloom-React/releases/download/v0.2.3/Atherloom-React-Android-release.apk)。
+当前固定签名版：[`v0.2.5 免登录直接下载 APK`](https://github.com/Yussica1026/Atherloom-React/releases/download/v0.2.5/Atherloom-React-Android-release.apk)。
 
-`v0.2.3` 已包含语音稳定架构、MiniMax TTS、默认文楷与多字体、日记 / 留言板 / 梦库对齐、用户可控自动唤醒和人格子代理。公开 APK 的哈希、包名、版本与固定证书已复核；真实 Android 权限、厂商识别服务、音频焦点及真实 MiniMax Key 仍待手机验收。
+`v0.2.5` 在既有语音、MiniMax TTS、多字体、日记 / 留言板 / 梦库、自动唤醒和人格子代理基础上，新增无需电脑后端的同 Persona 井字棋与猜拳完整链路。
 
 需要共用现有 FastAPI/SQLite 时，可进入“设置 → 后端连接”填写电脑或服务器地址，例如 `http://192.168.1.20:8876`；清空地址并保存即可切回本机模式。详细说明见 [Android 构建说明](android/README.md)。
 

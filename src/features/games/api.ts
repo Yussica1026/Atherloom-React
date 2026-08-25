@@ -6,6 +6,8 @@ import type {
   CasualGameMemoryDecision,
   CasualGameResultRecord,
   CasualGameSession,
+  CasualGameSessionList,
+  RegisteredCasualGameState,
 } from "./types";
 
 function sessionPath(sessionId: string) {
@@ -17,6 +19,16 @@ function resultPath(resultId: string) {
 }
 
 export const casualGameApi = {
+  createSession: (gameId: string, conversationId: string, idempotencyKey: string) =>
+    requestJson<CasualGameSession<RegisteredCasualGameState>>("/api/casual-games/sessions", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify({ game_id: gameId, conversation_id: conversationId, options: {} }),
+    }),
+
+  listSessions: (conversationId: string, status = "active") =>
+    requestJson<CasualGameSessionList>(`/api/casual-games/sessions?conversation_id=${encodeURIComponent(conversationId)}&status=${encodeURIComponent(status)}`),
+
   getSession: <State>(sessionId: string) =>
     requestJson<CasualGameSession<State>>(sessionPath(sessionId)),
 

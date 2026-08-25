@@ -290,6 +290,9 @@ export interface Memory {
   importance: number;
   confidence: number;
   source_type: "explicit" | "inferred" | "summary" | string;
+  source_conversation_id?: string | null;
+  source_message_id?: string | null;
+  provenance?: Record<string, unknown>;
   memory_status?: "active" | "candidate" | "forgotten" | "superseded" | string;
   strength?: number;
   effective_strength?: number;

@@ -57,3 +57,7 @@ const registrations: Partial<Record<CasualGameId, GameRegistration>> = {
 export function getGameRegistration(gameId: CasualGameId) {
   return registrations[gameId] || null;
 }
+
+export function listGameRegistrations() {
+  return [registrations.tic_tac_toe, registrations.rock_paper_scissors].filter((item): item is GameRegistration => Boolean(item));
+}

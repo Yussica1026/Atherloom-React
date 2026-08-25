@@ -16,6 +16,7 @@ import "./styles.css";
 const themeKey = "atherloom-react:theme";
 const fontKey = "atherloom-react:font";
 const LongWorldHub = lazy(() => import("../features/longworld/LongWorldHub").then((module) => ({ default: module.LongWorldHub })));
+const GameHub = lazy(() => import("../features/games/GameHub").then((module) => ({ default: module.GameHub })));
 const GameOverlay = lazy(() => import("../features/games/GameOverlay").then((module) => ({ default: module.GameOverlay })));
 const driveLabels: Record<string, string> = { connection: "联结", curiosity: "好奇", reflection: "反思", duty: "责任", social: "交流", fatigue: "疲劳", closeness: "亲近", stress: "压力", joy: "愉悦" };
 
@@ -550,8 +551,19 @@ export default function App() {
             openSettings("connection");
           }}
         /></Suspense> : null}
+      {featureSpace === "games" ? <Suspense fallback={<div className="dialog-layer"><section className="compact-dialog"><p>正在打开休闲游戏…</p></section></div>}><GameHub
+        conversationId={workspace.currentId}
+        conversationTitle={workspace.currentConversation?.title || "当前对话"}
+        personaId={workspace.currentConversation?.persona_id || workspace.personaId}
+        personaName={workspace.personas.find((item) => item.id === (workspace.currentConversation?.persona_id || workspace.personaId))?.name || "当前人格"}
+        onClose={() => setFeatureSpace(null)}
+        onOpenGame={(effect) => {
+          setFeatureSpace(null);
+          setActiveGame(effect);
+        }}
+      /></Suspense> : null}
       <FeatureHub
-        open={featureSpace === "longworld" ? null : featureSpace}
+        open={featureSpace === "longworld" || featureSpace === "games" ? null : featureSpace}
         personaId={workspace.personaId}
         personas={workspace.personas}
         providers={workspace.providers}

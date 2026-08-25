@@ -1,6 +1,6 @@
 # Atherloom React 工作日志
 
-## 2026-08-25 · v0.2.4 固定签名发布候选
+## 2026-08-25 · v0.2.4 固定签名版（已发布，待真机）
 
 > 本版合并已经完成的 Direct Provider 明文误配防护、长期世界 React 客户端，以及 Casual Games 的井字棋与猜拳同 Persona 链路。发布范围只包含 `Atherloom-React`；旧 HTML / FastAPI 仓库、本地数据库和私人日记均不进入 GitHub 或 APK。
 
@@ -12,14 +12,17 @@
 - 长期世界与 Casual Games 当前都需要连接支持相应 API 的 FastAPI。Android 完全离线 Standalone 尚未接入，界面不会伪造离线可用；本次也没有把新领域继续塞进 `standalone/store.ts`。
 - 生产代码与公开测试数据不内置任何具体用户或 Persona 名称；空玩家名使用中性“玩家”。内容型提示仍来自用户配置，代码只保留协议与规则约束。
 
-### 发布前验证
+### 发布验证
 
 - TypeScript typecheck 与 production build 通过（328 modules）；长期世界和游戏 Overlay 均为独立懒加载 chunk，只有既存主 bundle 超过 500 kB 的分包建议。
 - Android Provider 安全、语音、Casual Games、LongWorld、React 回归与版本契约共 `55/55` 通过。
 - 同一静态服务下连续通过三个 Edge Playwright smoke：`LONGWORLD_GM_SMOKE_OK`、`CASUAL_TTT_SMOKE_OK`、`CASUAL_RPS_SMOKE_OK`；控制台、页面和 HTTP 错误均为 0，三张最终截图已经人工核对。
-- 发布前尚未创建 `v0.2.4` 标签或 Release；固定签名 APK、公开附件哈希、包信息与证书将在 GitHub Actions 完成后回填。
+- 功能提交 `624f731` 已推送至 `feat/android-apk`；分支构建 `32802285976` 与 `v0.2.4` 标签固定签名构建 `32802579419` 均成功。
+- 公开 Release 已生成四个附件。APK 为 `11,765,372` 字节，SHA-256 为 `41b6f52684fc7eddab46c636b122a24daf7edc42d770c0fa45d12787ce428cc4`；CI 已核对包名 `app.atherloom.react`、versionCode `10`、versionName `0.2.4-react-release` 与固定签名证书。
+- Release：<https://github.com/Yussica1026/Atherloom-React/releases/tag/v0.2.4>；APK 直链：<https://github.com/Yussica1026/Atherloom-React/releases/download/v0.2.4/Atherloom-React-Android-release.apk>。
+- 自动化与签名构建已经完成；真实 Android 上的覆盖安装、FastAPI 连接、长期世界和两款 Casual Games 仍需真机验收。
 
-## 2026-08-24 · Casual Games 猜拳同人格链路（并入 v0.2.4 发布候选）
+## 2026-08-24 · Casual Games 猜拳同人格链路（已随 v0.2.4 发布）
 
 > 在井字棋 vertical slice 的既有边界上新增第二个 Registry 插件“猜拳”。仍由当前 Conversation 的同一 Persona 参与，每一个 AI 游戏回合复用该 Persona 当前的 Provider/model、Persona 配置、相关长期记忆与用户游戏行为配置；没有创建 Game Persona，也没有把 Casual Games 并入旧小游戏或 LongWorld。发布状态见顶部 v0.2.4 节。
 
@@ -41,9 +44,9 @@
 ### 仍未做
 
 - 猜数字和二十问尚未实现；Android 完全离线 Standalone 也尚未接入 Casual Games。
-- 猜拳已经纳入 v0.2.4 发布候选；固定签名与公开附件验证见顶部发布记录。
+- 猜拳已经随 v0.2.4 发布；固定签名与公开附件验证见顶部发布记录。
 
-## 2026-08-24 · Casual Games 井字棋同人格链路（并入 v0.2.4 发布候选）
+## 2026-08-24 · Casual Games 井字棋同人格链路（已随 v0.2.4 发布）
 
 > 本轮完成 Casual Games 的第一个最小 vertical slice：从原聊天由当前 Persona 主动打开井字棋，完成对局后把可信结果送回同一聊天，并按用户选择写入同一 Persona 的长期记忆。旧 `/api/games` 与 LongWorld 均未并入本模块；发布状态见顶部 v0.2.4 节。
 
@@ -73,9 +76,9 @@
 
 - 猜数字和二十问尚未扩展为完整插件；先不扩游戏数量。
 - Android 完全离线 Standalone、游戏行为配置 UI 的完整导入/导出，以及更广的真机验收尚未实现。
-- 井字棋已经纳入 v0.2.4 发布候选；固定签名与公开附件验证见顶部发布记录。
+- 井字棋已经随 v0.2.4 发布；固定签名与公开附件验证见顶部发布记录。
 
-## 2026-08-24 · v0.2.4 Direct Provider 明文误配防护（本地发布候选）
+## 2026-08-24 · v0.2.4 Direct Provider 明文误配防护（已发布）
 
 > 本轮按个人自托管应用的实际威胁模型收口：继续支持 localhost、局域网与 FastAPI 后端 HTTP，只防止 Direct Provider 的明显明文误配和凭据跨目标发送，不引入 SaaS 级证书固定或复杂网络策略。本节尚未代表 APK 已发布。
 
@@ -92,7 +95,7 @@
 - 纯 Java 策略测试覆盖 HTTPS、常见 LAN/loopback HTTP、公网 HTTP 明确确认、近似私网反例、凭据 scope，以及 301/302/303/307/308 双服务器不跟随验证。
 - React 浏览器回归已验证 HTTP 警告、取消时零原生调用、确认标记、HTTPS 无弹窗及既有桌面/移动流程；production build 仍为 312 个模块。
 - 发布门禁新增 `0.2.4` / versionCode `10` / Service Worker 一致性检查，GitHub Actions 在签名构建前运行 Android 安全、语音、React 回归与版本契约，并在 APK badging 中核对版本。
-- 当前改动仅在本地工作树中；未提交、未推送、未创建 `v0.2.4` 标签或 Release，真实 Android Direct Provider 仍待固定签名 APK 真机验证。
+- 本功能已随 `v0.2.4` 固定签名 APK 发布；提交、构建和公开附件证据见顶部发布记录，真实 Android Direct Provider 仍待真机验证。
 
 ## 2026-08-23 · v0.2.3 语音、字体、写作与自主能力（已发布，待真机）
 

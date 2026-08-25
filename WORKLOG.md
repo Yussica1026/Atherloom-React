@@ -1,6 +1,6 @@
 # Atherloom React 工作日志
 
-## 2026-08-25 · v0.2.5 Android Standalone 休闲游戏（待固定签名发布）
+## 2026-08-25 · v0.2.5 Android Standalone 休闲游戏（已发布）
 
 > 修正 v0.2.4 只有 FastAPI Casual Games、Android 本机模式不可用的问题。本轮完成可见入口与完整本地链路；不再把“代码进入 APK”当成手机可用。
 
@@ -11,6 +11,8 @@
 - Standalone 聊天新增原生结构化 `atherloom_open_game`，支持“陪我玩井字棋 / 我们来猜拳”等自然语言请求；Session 使用源消息与 game id 幂等创建。
 - 手机 390×844 Playwright 冒烟已通过：GameHub 开局、井字棋完整胜局、猜拳隐藏选择、赛后原聊天回复、同 Persona 记忆、聊天工具开局、收起后继续。
 - `npm run build` 通过；React/Android 静态契约 55 项通过。另 1 项既有纯 Java 测试在本机受沙箱拒绝启动 `javac`，未涉及本轮代码，交由 GitHub Actions 发布门禁执行。
+- 功能提交 `b5eee48` 已推送；分支构建 `32806533876` 与 `v0.2.5` 标签构建 `32806692460` 均通过完整 React、Android、Java 与固定签名门禁。
+- 公开 APK 为 `11,797,306` 字节，SHA-256 为 `6244b9e0b9184ec3b048ddbca44b473108dbfc51745f73f730cd4b734f3f084f`，versionCode `11`，versionName `0.2.5-react-release`。Release：<https://github.com/Yussica1026/Atherloom-React/releases/tag/v0.2.5>；APK 直链：<https://github.com/Yussica1026/Atherloom-React/releases/download/v0.2.5/Atherloom-React-Android-release.apk>。
 
 ## 2026-08-25 · v0.2.4 固定签名版（已发布，待真机）
 

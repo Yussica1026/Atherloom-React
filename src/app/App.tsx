@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { fastApi, getApiBase, setApiBase } from "../adapters/fastapi/client";
 import { saveFile } from "../adapters/native/files";
 import { MenuIcon, SparkIcon } from "../components/Icons";
@@ -6,6 +6,7 @@ import { isFontName, isThemeName, type Attachment, type FontName, type Message, 
 import { Composer } from "../features/chat/Composer";
 import { MessageList } from "../features/chat/MessageList";
 import { VoiceCall } from "../features/chat/VoiceCall";
+import { parseOpenGameEffect, type OpenGameEffect } from "../features/games/types";
 import { SettingsPanel, type SettingsTab } from "../features/settings/SettingsPanel";
 import { Sidebar } from "../features/shell/Sidebar";
 import { FeatureHub, type FeatureSpace } from "../features/spaces/FeatureHub";
@@ -14,6 +15,8 @@ import "./styles.css";
 
 const themeKey = "atherloom-react:theme";
 const fontKey = "atherloom-react:font";
+const LongWorldHub = lazy(() => import("../features/longworld/LongWorldHub").then((module) => ({ default: module.LongWorldHub })));
+const GameOverlay = lazy(() => import("../features/games/GameOverlay").then((module) => ({ default: module.GameOverlay })));
 const driveLabels: Record<string, string> = { connection: "联结", curiosity: "好奇", reflection: "反思", duty: "责任", social: "交流", fatigue: "疲劳", closeness: "亲近", stress: "压力", joy: "愉悦" };
 
 function worldbookSelectionKey(conversationId: string | null) {
@@ -66,6 +69,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("providers");
   const [featureSpace, setFeatureSpace] = useState<FeatureSpace | null>(null);
+  const [activeGame, setActiveGame] = useState<OpenGameEffect | null>(null);
   const [callOpen, setCallOpen] = useState(false);
   const [compressOpen, setCompressOpen] = useState(false);
   const [compressRounds, setCompressRounds] = useState(1);
@@ -121,8 +125,24 @@ export default function App() {
   }, [workspace.settings.code_theme, workspace.settings.font_scale]);
 
   useEffect(() => {
+    const pending = workspace.pendingToolEffects[0];
+    if (!pending) return;
+    workspace.consumeToolEffect(pending.id);
+    const effect = parseOpenGameEffect(pending.event.effect);
+    if (!effect) return;
+    setSidebarOpen(false);
+    setSettingsOpen(false);
+    setFeatureSpace(null);
+    setCallOpen(false);
+    setCompressOpen(false);
+    setChatStatusOpen(false);
+    setActiveGame(effect);
+  }, [workspace.consumeToolEffect, workspace.pendingToolEffects]);
+
+  useEffect(() => {
     const handleBack = (event: Event) => {
-      if (callOpen) setCallOpen(false);
+      if (activeGame) setActiveGame(null);
+      else if (callOpen) setCallOpen(false);
       else if (compressOpen) setCompressOpen(false);
       else if (featureSpace) setFeatureSpace(null);
       else if (chatStatusOpen) setChatStatusOpen(false);
@@ -133,7 +153,7 @@ export default function App() {
     };
     window.addEventListener("atherloom:back", handleBack);
     return () => window.removeEventListener("atherloom:back", handleBack);
-  }, [callOpen, chatStatusOpen, compressOpen, featureSpace, settingsOpen, sidebarOpen]);
+  }, [activeGame, callOpen, chatStatusOpen, compressOpen, featureSpace, settingsOpen, sidebarOpen]);
 
   useEffect(() => {
     if (!chatStatusOpen) return;
@@ -520,8 +540,18 @@ export default function App() {
         onTestMcpServer={workspace.testMcpServer}
         onRefreshMcpServer={workspace.refreshMcpServer}
       />
+      {featureSpace === "longworld" ? <Suspense fallback={<div className="dialog-layer"><section className="compact-dialog"><p>正在打开长期世界引擎…</p></section></div>}><LongWorldHub
+          personas={workspace.personas}
+          providers={workspace.providers}
+          playerDisplayName={String(workspace.settings.display_name || "")}
+          onClose={() => setFeatureSpace(null)}
+          onOpenConnectionSettings={() => {
+            setFeatureSpace(null);
+            openSettings("connection");
+          }}
+        /></Suspense> : null}
       <FeatureHub
-        open={featureSpace}
+        open={featureSpace === "longworld" ? null : featureSpace}
         personaId={workspace.personaId}
         personas={workspace.personas}
         providers={workspace.providers}
@@ -559,6 +589,14 @@ export default function App() {
         onTranscript={async (content) => (await workspace.send(content, [], selectedWorldbookIds)) || ""}
         onCancelTranscript={workspace.stop}
       />
+      {activeGame ? <Suspense fallback={<div className="dialog-layer"><section className="compact-dialog" role="status"><p>正在铺开棋盘…</p></section></div>}><GameOverlay
+        key={activeGame.session_id}
+        effect={activeGame}
+        personaName={workspace.personas.find((item) => item.id === activeGame.persona_id)?.name || "当前人格"}
+        conversationTitle={workspace.conversations.find((item) => item.id === activeGame.conversation_id)?.title || workspace.currentConversation?.title || "原对话"}
+        onClose={() => setActiveGame(null)}
+        onConversationUpdated={workspace.refreshConversationMessages}
+      /></Suspense> : null}
     </div>
   );
 }

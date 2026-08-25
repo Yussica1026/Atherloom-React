@@ -1,5 +1,80 @@
 # Atherloom React 工作日志
 
+## 2026-08-25 · v0.2.4 固定签名发布候选
+
+> 本版合并已经完成的 Direct Provider 明文误配防护、长期世界 React 客户端，以及 Casual Games 的井字棋与猜拳同 Persona 链路。发布范围只包含 `Atherloom-React`；旧 HTML / FastAPI 仓库、本地数据库和私人日记均不进入 GitHub 或 APK。
+
+### 本版边界
+
+- Direct Provider 继续允许 localhost / LAN HTTP；其他 HTTP 线路必须逐线路明确确认，并且携密请求不跟随重定向、Key 不跨目标自动复用。
+- 长期世界使用独立 `src/features/longworld/` 和 `/api/game-worlds`、`/api/game-sessions` 客户端命名空间。GM 只能提出候选，前端显示服务器已提交的领域事件、revision、replay、存档与分支；不复用旧 `/api/games` 或 Casual Games 领域对象。
+- Casual Games 使用独立 `src/features/games/` 和 `/api/casual-games`；当前同一 Conversation 的 Persona 通过实时 `open_game` tool effect 进入井字棋或猜拳，每个 AI 回合、赛后回复和可选记忆仍属于原 Persona。记忆默认 `ask`。
+- 长期世界与 Casual Games 当前都需要连接支持相应 API 的 FastAPI。Android 完全离线 Standalone 尚未接入，界面不会伪造离线可用；本次也没有把新领域继续塞进 `standalone/store.ts`。
+- 生产代码与公开测试数据不内置任何具体用户或 Persona 名称；空玩家名使用中性“玩家”。内容型提示仍来自用户配置，代码只保留协议与规则约束。
+
+### 发布前验证
+
+- TypeScript typecheck 与 production build 通过（328 modules）；长期世界和游戏 Overlay 均为独立懒加载 chunk，只有既存主 bundle 超过 500 kB 的分包建议。
+- Android Provider 安全、语音、Casual Games、LongWorld、React 回归与版本契约共 `55/55` 通过。
+- 同一静态服务下连续通过三个 Edge Playwright smoke：`LONGWORLD_GM_SMOKE_OK`、`CASUAL_TTT_SMOKE_OK`、`CASUAL_RPS_SMOKE_OK`；控制台、页面和 HTTP 错误均为 0，三张最终截图已经人工核对。
+- 发布前尚未创建 `v0.2.4` 标签或 Release；固定签名 APK、公开附件哈希、包信息与证书将在 GitHub Actions 完成后回填。
+
+## 2026-08-24 · Casual Games 猜拳同人格链路（并入 v0.2.4 发布候选）
+
+> 在井字棋 vertical slice 的既有边界上新增第二个 Registry 插件“猜拳”。仍由当前 Conversation 的同一 Persona 参与，每一个 AI 游戏回合复用该 Persona 当前的 Provider/model、Persona 配置、相关长期记忆与用户游戏行为配置；没有创建 Game Persona，也没有把 Casual Games 并入旧小游戏或 LongWorld。发布状态见顶部 v0.2.4 节。
+
+### 公平提交与同一 Persona
+
+- 聊天工具现在允许 `rock_paper_scissors`，自然语言“陪我玩猜拳”会产生本轮可信 `open_game` effect，并在原聊天上方打开独立游戏 Overlay。
+- 用户手势提交后，公开 session 只显示 `user_choice_committed=true`；Persona 作出自己的选择前拿不到用户的石头、剪刀或布。双方都提交后，服务器才把两手同时揭示并由确定性规则判胜。
+- 前端不计算胜负、不随机替 Persona 出拳，也没有本地作弊兜底。Persona 回合失败时保留原 session 和 revision，允许用户明确重试。
+- 可信 `result_id` 仍幂等回写原 Conversation 的赛后回复；记忆默认 `ask`，确认后只把已验证的双方手势与结果摘要写入同一 Persona 的真实互动记忆。
+
+### 界面与验证
+
+- 猜拳界面沿用当前主题 token、`color-mix()` 与楷体体系，没有固定颜色；手机端包含键盘标签、ARIA live 状态、焦点隔离与 reduced-motion 支持。
+- TypeScript typecheck、production build 通过（328 modules）；仅有原有主 bundle 超过 500 kB 的分包提示。
+- React contract / regression 共 `39/39` 通过；后端全量回归 `250/250` 通过，仅有既存 Starlette/httpx 弃用提示。
+- 390×844 Edge Playwright smoke 输出 `CASUAL_RPS_SMOKE_OK`，覆盖自然语言开局、揭示前封存、服务端 Persona 回合、同时揭示、可信胜负、原聊天赛后回复与记忆确认；控制台、页面和 HTTP 错误均为 0。
+- 人工核对截图 `artifacts/casual-rock-paper-scissors-smoke.png` 通过；临时静态服务已关闭。
+
+### 仍未做
+
+- 猜数字和二十问尚未实现；Android 完全离线 Standalone 也尚未接入 Casual Games。
+- 猜拳已经纳入 v0.2.4 发布候选；固定签名与公开附件验证见顶部发布记录。
+
+## 2026-08-24 · Casual Games 井字棋同人格链路（并入 v0.2.4 发布候选）
+
+> 本轮完成 Casual Games 的第一个最小 vertical slice：从原聊天由当前 Persona 主动打开井字棋，完成对局后把可信结果送回同一聊天，并按用户选择写入同一 Persona 的长期记忆。旧 `/api/games` 与 LongWorld 均未并入本模块；发布状态见顶部 v0.2.4 节。
+
+### 同一 Persona 完整链路
+
+- 聊天模型通过 `atherloom_open_game({ game_id: "tic_tac_toe" })` 明确发起游戏；前端只消费本轮实时 `tool_event.effect`，不会扫描历史消息或在刷新后重复打开。
+- 游戏 session 继续绑定原 `conversation_id`、`persona_id` 与 `player_id`。Persona 的每一个游戏回合都重新读取当前 Persona、Provider/model、相关记忆、游戏行为配置和必要聊天上下文，不创建 `GamePersona`、匿名机器人或第二套人格记忆。
+- Persona 只提出合法落子位置，回合顺序、空格校验、胜负和平局由确定性规则引擎裁定；前端没有 minimax、随机兜底或可绕过服务端的 Persona 落子入口。
+- 对局结束后，前端只提交可信 `result_id`。服务端校验结果后在原 Conversation 中幂等生成一次赛后回复，不伪造新的用户消息，也不会把结果写到另一个会话。
+- 记忆默认使用 `ask`：用户可选择“记住这局”或“这次不记”。用户明确把某 Persona 的游戏配置设为 `auto` 时才自动写入；长期记忆只保存程序根据已验证结果生成的中性摘要，不保存每一步棋。
+
+### 独立模块与界面边界
+
+- 新增独立 `src/features/games/`，包含 Registry、API、session hook、主题化 Overlay 和井字棋插件；没有把 Casual Games 塞进 `standalone/store.ts`、旧小游戏或 LongWorld 的领域对象。
+- Overlay 沿用现有主题变量与楷体体系，不固定颜色；手机端使用全屏布局，并补齐焦点圈定、Escape / Android 返回键、焦点恢复、`inert`、ARIA 状态与减少动画偏好。
+- 棋盘使用“织线成局”的细线视觉作为模块识别元素；水色与丁香等主题切换已用真实计算样式验证，颜色会跟随主题变化。
+- 当前 vertical slice 面向 Web / Android 连接 FastAPI 的模式。Android 完全离线 Standalone 尚未实现 Casual Games 持久化，后续也不能直接把它塞进现有超大 store。
+
+### 本轮验证
+
+- `npm run typecheck` 通过；production build 通过（327 modules），GameOverlay 保持独立懒加载 chunk。仅有原有主 bundle 超过 500 kB 的提示，没有新增构建错误。
+- React contract / regression 共 `38/38` 通过。
+- 390×844 真实浏览器 smoke 通过：自然语言工具事件、同一 Persona/session、用户与 Persona 回合、可信结果、原聊天赛后回复一次、记忆询问与批准、主题变化、减少动画、焦点管理和 Android 返回键均已覆盖，输出 `CASUAL_TTT_SMOKE_OK`。
+- 本地烟测截图保存在 `artifacts/casual-tic-tac-toe-smoke.png`；临时测试服务均已关闭。
+
+### 明确留到下一轮
+
+- 猜数字和二十问尚未扩展为完整插件；先不扩游戏数量。
+- Android 完全离线 Standalone、游戏行为配置 UI 的完整导入/导出，以及更广的真机验收尚未实现。
+- 井字棋已经纳入 v0.2.4 发布候选；固定签名与公开附件验证见顶部发布记录。
+
 ## 2026-08-24 · v0.2.4 Direct Provider 明文误配防护（本地发布候选）
 
 > 本轮按个人自托管应用的实际威胁模型收口：继续支持 localhost、局域网与 FastAPI 后端 HTTP，只防止 Direct Provider 的明显明文误配和凭据跨目标发送，不引入 SaaS 级证书固定或复杂网络策略。本节尚未代表 APK 已发布。

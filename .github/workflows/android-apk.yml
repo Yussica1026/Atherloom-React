@@ -42,6 +42,8 @@ jobs:
           python -m unittest
           android.tests.test_provider_http_policy
           android.tests.test_voice_contract
+          tests.react_casual_games_contracts
+          tests.react_longworld_contracts
           tests.react_regression_contracts
           tests.release_contracts
           -v
@@ -107,4 +109,4 @@ jobs:
             android/apk-signature.txt \
             android/apk-badging.txt \
             --title "Atherloom React $GITHUB_REF_NAME" \
-            --notes "Atherloom React Android 固定签名版。独立包名 app.atherloom.react，不会覆盖旧版 Atherloom。已安装固定签名版的设备可直接覆盖升级并保留应用数据。默认使用 Android 本机模式：API Key 加密保存，设置与聊天保存在本机；如需共用服务器数据，可在设置中填写 FastAPI 后端地址。"
+            --notes "Atherloom React Android 固定签名版。v0.2.4 增加 Direct Provider 明文误配防护、长期世界 React 客户端，以及同一 Persona 的井字棋与猜拳链路。长期世界和 Casual Games 当前需要连接支持对应 API 的 FastAPI；Android 完全离线 Standalone 不伪装成已经支持。独立包名 app.atherloom.react，不会覆盖旧版 Atherloom；已安装固定签名版的设备可直接覆盖升级并保留应用数据。"

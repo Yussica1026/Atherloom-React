@@ -181,6 +181,7 @@ export interface ToolEvent {
   detail?: string;
   query?: string;
   result?: unknown;
+  effect?: unknown;
   [key: string]: unknown;
 }
 

@@ -16,6 +16,7 @@ import type {
   Provider,
   ProviderDraft,
   ProviderProbeDraft,
+  ToolEvent,
   Worldbook,
   WorldbookDraft,
 } from "../../domain/types";
@@ -27,6 +28,19 @@ const personaKey = "atherloom-react:last-persona";
 const conversationKey = "atherloom-react:last-conversation";
 const voiceConfigKey = "atherloom-react:voice-config:v1";
 const privateConversationCleanupKey = "atherloom-react:private-conversation-cleanup:v1";
+
+export interface LiveToolEffect {
+  id: string;
+  event: ToolEvent;
+}
+
+function liveToolEffectId(event: ToolEvent) {
+  const effect = event.effect && typeof event.effect === "object" && !Array.isArray(event.effect)
+    ? event.effect as Record<string, unknown>
+    : {};
+  const explicit = event.effect_id || event.tool_call_id || event.id || effect.effect_id || effect.session_id;
+  return String(explicit || crypto.randomUUID?.() || `tool-effect-${Date.now()}-${Math.random()}`);
+}
 
 function readPrivateConversationCleanupQueue() {
   try {
@@ -178,6 +192,7 @@ export function useWorkspace() {
   const [personaId, setPersonaIdState] = useState<string | null>(null);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [pendingToolEffects, setPendingToolEffects] = useState<LiveToolEffect[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -189,6 +204,21 @@ export function useWorkspace() {
   const hydratePromiseRef = useRef<Promise<void> | null>(null);
   const personaRequestRef = useRef(0);
   const privateGenerationRef = useRef(false);
+  const currentIdRef = useRef<string | null>(currentId);
+  const seenToolEffectIdsRef = useRef(new Set<string>());
+  currentIdRef.current = currentId;
+
+  const queueLiveToolEffect = useCallback((event: ToolEvent) => {
+    if (event.effect === undefined || event.effect === null) return;
+    const id = liveToolEffectId(event);
+    if (seenToolEffectIdsRef.current.has(id)) return;
+    seenToolEffectIdsRef.current.add(id);
+    setPendingToolEffects((current) => [...current, { id, event }]);
+  }, []);
+
+  const consumeToolEffect = useCallback((id: string) => {
+    setPendingToolEffects((current) => current.filter((item) => item.id !== id));
+  }, []);
 
   const hydrate = useCallback(async () => {
     if (hydratePromiseRef.current) return hydratePromiseRef.current;
@@ -272,6 +302,12 @@ export function useWorkspace() {
   );
 
   const currentConversation = privateCleanupIds.includes(currentId || "") ? null : conversations.find((conversation) => conversation.id === currentId) || null;
+
+  const refreshConversationMessages = useCallback(async (conversationId: string) => {
+    const nextMessages = await fastApi.conversationMessages(conversationId);
+    if (currentIdRef.current === conversationId) setMessages(nextMessages);
+    return nextMessages;
+  }, []);
 
   const setProviderId = useCallback((id: string) => {
     setProviderIdState(id || null);
@@ -576,6 +612,7 @@ export function useWorkspace() {
         approved_tool_permissions: approvedToolPermissions,
       }, controller.signal, (event) => {
         if (event.error) throw new Error(event.error);
+        if (event.tool_event) queueLiveToolEffect(event.tool_event);
         assistantText += event.delta || "";
         setMessages((current) => current.map((message) => {
           if (message.client_id === userClientId && event.user_id) return { ...message, id: event.user_id };
@@ -613,7 +650,7 @@ export function useWorkspace() {
       setBusy(false);
     }
     return assistantText.trim();
-  }, [busy, conversations, createConversation, currentId, messages, personaId, providerId, providers]);
+  }, [busy, conversations, createConversation, currentId, messages, personaId, providerId, providers, queueLiveToolEffect]);
 
   const send = useCallback((content: string, attachments: Attachment[] = [], worldbookIds: string[] = [], typingContext = "") => (
     runGeneration(content, null, attachments, worldbookIds, typingContext)
@@ -992,6 +1029,7 @@ export function useWorkspace() {
     currentId,
     currentConversation,
     messages,
+    pendingToolEffects,
     loading,
     busy,
     error,
@@ -1000,6 +1038,8 @@ export function useWorkspace() {
     setProviderStreamMode,
     setPersonaId: selectPersona,
     openConversation,
+    refreshConversationMessages,
+    consumeToolEffect,
     createConversation,
     deleteConversation,
     clearPersonaConversations,

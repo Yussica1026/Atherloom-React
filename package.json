@@ -1,13 +1,14 @@
 {
   "name": "atherloom-react",
   "private": true,
-  "version": "0.2.6-rc1",
+  "version": "0.2.6",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "android:prepare": "npm run build",
     "typecheck": "tsc -b --pretty false",
+    "test:books": "esbuild ./src/features/books/analysis.test.ts ./src/features/books/ingest.test.ts ./src/features/books/output.test.ts --bundle --platform=node --format=cjs --out-extension:.js=.cjs --outdir=artifacts/book-tests && node --test artifacts/book-tests/analysis.test.cjs artifacts/book-tests/ingest.test.cjs artifacts/book-tests/output.test.cjs",
     "preview": "vite preview"
   },
   "dependencies": {

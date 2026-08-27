@@ -4,8 +4,8 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.2.6-rc1"
-EXPECTED_VERSION_CODE = 12
+EXPECTED_VERSION = "0.2.6"
+EXPECTED_VERSION_CODE = 13
 
 
 class ReleaseContracts(unittest.TestCase):

@@ -120,11 +120,11 @@ class LegacyRegressionContracts(unittest.TestCase):
         self.assertIn("requestId !== personaRequestRef.current", block)
 
     def test_pdf_is_real_local_extraction(self):
-        hub = source("src/features/spaces/FeatureHub.tsx")
-        self.assertIn("pdf.worker.mjs", hub)
-        self.assertIn("getTextContent", hub)
-        self.assertIn("await task.destroy()", hub)
-        self.assertNotIn("请先转成 TXT", hub)
+        ingest = source("src/features/books/ingest.ts")
+        self.assertIn("pdf.worker.mjs", ingest)
+        self.assertIn("getTextContent", ingest)
+        self.assertIn("await task.destroy()", ingest)
+        self.assertNotIn("请先转成 TXT", ingest)
 
     def test_android_exports_are_not_browser_only_and_backup_is_redacted(self):
         worldbook = source("src/features/settings/WorldbookSettings.tsx")

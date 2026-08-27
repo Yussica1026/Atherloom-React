@@ -11,3 +11,12 @@ Klee Project Authors. It is distributed under the SIL Open Font License
 The source distribution keeps the notice and license under
 `src/assets/fonts/`. Redistributed web and Android builds keep them under
 `licenses/`.
+
+Cove Book Forge port
+--------------------
+
+The local book ingestion, deterministic chapter analysis cache, whole-book
+forge job, and Agent Skill export are clean TypeScript adaptations informed by
+`cove-book-forge-mcp` (Copyright 2026 cove-book-forge-mcp contributors),
+distributed under the MIT License. The complete license is redistributed under
+`licenses/COVE-BOOK-FORGE-MCP-MIT.txt`.

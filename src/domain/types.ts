@@ -136,6 +136,17 @@ export interface Conversation {
   archived?: boolean | number;
   summary?: string;
   archived_message_ids?: string[];
+  external_import?: ExternalImportProvenance;
+}
+
+export interface ExternalImportProvenance {
+  source_domain: string;
+  source_conversation_id?: string | null;
+  source_message_id?: string | null;
+  import_batch_id: string;
+  imported_at: string;
+  original_timestamp?: string | null;
+  source_context?: Record<string, unknown>;
 }
 
 export interface Attachment {
@@ -171,6 +182,7 @@ export interface Message {
   selected?: boolean | number;
   attachments?: Attachment[];
   tool_events?: ToolEvent[];
+  external_import?: ExternalImportProvenance;
 }
 
 export interface ToolEvent {

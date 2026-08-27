@@ -639,6 +639,96 @@ html[data-code-theme="contrast"] .message-content pre { background: #000; color:
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
 
+/* External conversation import reads like a migration ticket: route, manifest, mapping, receipt. */
+.external-import-settings { max-width: 780px; }
+.import-route { position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 0 0 18px; padding: 0; list-style: none; }
+.import-route::before { content: ""; position: absolute; z-index: 0; top: 14px; left: 12.5%; right: 12.5%; height: 1px; background: var(--border); }
+.import-route li { position: relative; z-index: 1; min-width: 0; display: grid; justify-items: center; gap: 5px; color: var(--muted); text-align: center; }
+.import-route li span { width: 29px; height: 29px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 50%; background: var(--surface); font: 650 11px/1 var(--sans); }
+.import-route li strong { font-size: 11px; font-weight: 550; }
+.import-route li.active, .import-route li.done { color: var(--text); }
+.import-route li.active span { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent-dark); }
+.import-route li.done span { border-color: var(--accent); background: var(--accent); color: var(--surface); }
+.import-source-card, .import-commit-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 18px; padding: 17px 18px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-2); }
+.import-source-card p, .import-commit-card p { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.import-platforms { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
+.import-platforms span { padding: 4px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 10px; }
+.import-preview { margin-top: 18px; overflow: hidden; border: 1px solid var(--border); border-radius: 15px; background: var(--surface); }
+.import-preview > header { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 16px 18px; border-bottom: 1px solid var(--border); }
+.import-preview > header span { color: var(--accent-dark); font-size: 9px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
+.import-preview > header h4 { margin: 3px 0 0; font: 400 20px/1.25 var(--serif); }
+.import-preview > header small { max-width: 44%; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.import-stat-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); border-bottom: 1px solid var(--border); }
+.import-stat-grid span { min-width: 0; padding: 12px 7px; border-right: 1px solid var(--border); color: var(--muted); font-size: 10px; text-align: center; }
+.import-stat-grid span:last-child { border-right: 0; }
+.import-stat-grid strong { display: block; margin-bottom: 2px; color: var(--text); font: 500 18px/1 var(--serif); }
+.import-warnings { margin: 12px 16px 0; border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); border-radius: 9px; background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+.import-warnings summary { padding: 9px 11px; cursor: pointer; color: var(--text); font-size: 12px; }
+.import-warnings p { display: flex; gap: 8px; margin: 0; padding: 8px 11px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; line-height: 1.45; }
+.import-warnings p strong { flex: 0 0 auto; color: var(--accent-dark); }
+.import-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 16px 10px; }
+.import-list-heading > div strong, .import-list-heading > div small { display: block; }
+.import-list-heading > div small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.import-conversation-list { max-height: 300px; overflow-y: auto; padding: 0 12px 12px; }
+.import-conversation-list label { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; margin-top: 5px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+.import-conversation-list label.selected { border-color: color-mix(in srgb, var(--accent) 58%, var(--border)); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.import-conversation-list input { width: 17px; height: 17px; accent-color: var(--accent); }
+.import-conversation-list span { min-width: 0; }
+.import-conversation-list span strong, .import-conversation-list span small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.import-conversation-list span strong { font-size: 12px; }
+.import-conversation-list span small { margin-top: 4px; color: var(--muted); font-size: 10px; }
+.import-conversation-list em { color: var(--accent-dark); font-size: 9px; font-style: normal; }
+.import-mapping-card { margin: 4px 12px 12px; overflow: hidden; border: 1px solid var(--border); border-radius: 11px; }
+.import-mapping-card > header { padding: 12px 13px; background: var(--surface-2); }
+.import-mapping-card > header p { margin: 4px 0 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.import-mapping-card > label { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 46%); align-items: center; gap: 12px; padding: 11px 13px; border-top: 1px solid var(--border); }
+.import-mapping-card > label span strong, .import-mapping-card > label span small { display: block; }
+.import-mapping-card > label span small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.import-mapping-card select { min-width: 0; min-height: 38px; border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; background: var(--surface); color: var(--text); }
+.import-commit-card { margin: 0 12px 12px; background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.import-result { margin: 13px; padding: 16px; border-left: 3px solid var(--accent); background: var(--surface-2); }
+.import-result p { margin: 5px 0 11px; color: var(--muted); font-size: 12px; }
+.import-result.rolled_back { border-left-color: var(--border); }
+.import-archive-reader { margin: 0 12px 12px; overflow: hidden; border: 1px solid var(--border); border-radius: 11px; }
+.import-archive-reader > header { padding: 12px 13px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
+.import-archive-reader > header strong, .import-archive-reader > header small { display: block; }
+.import-archive-reader > header small { margin-top: 3px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.imported-conversation-tabs { display: flex; gap: 5px; overflow-x: auto; padding: 9px; border-bottom: 1px solid var(--border); }
+.imported-conversation-tabs button { flex: 0 0 auto; max-width: 220px; display: grid; gap: 2px; border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; background: var(--surface); color: var(--text); font-size: 11px; text-align: left; }
+.imported-conversation-tabs button.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+.imported-conversation-tabs button small { color: var(--muted); font-size: 9px; }
+.imported-message-reader { max-height: 340px; overflow-y: auto; display: grid; gap: 9px; padding: 12px; background: var(--surface-2); }
+.imported-message-reader article { max-width: 88%; padding: 10px 12px; border-radius: 10px; background: var(--surface); }
+.imported-message-reader article[data-role="user"] { justify-self: end; background: var(--user-bubble); }
+.imported-message-reader article > strong { color: var(--muted); font-size: 9px; }
+.imported-message-reader article > p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.55; }
+.imported-message-reader details { margin-top: 7px; color: var(--muted); font-size: 10px; }
+.imported-message-reader details p { margin: 5px 0 0; white-space: pre-wrap; }
+.import-reader-empty { margin: 0; padding: 18px 13px; color: var(--muted); font-size: 11px; }
+.import-status { min-height: 20px; margin: 10px 2px 0; }
+.import-history { margin-top: 18px; border-top: 1px solid var(--border); }
+.import-history > summary { padding: 14px 2px; cursor: pointer; color: var(--muted); font-size: 12px; }
+.import-history > div { display: grid; gap: 6px; }
+.import-history article { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; }
+.import-history article span { min-width: 0; }
+.import-history article strong, .import-history article small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.import-history article strong { font-size: 11px; }
+.import-history article small { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.import-history article em { color: var(--muted); font-size: 10px; font-style: normal; }
+.import-history article em[data-status="committed"] { color: var(--accent-dark); }
+.import-history article button { border: 0; padding: 5px 7px; border-radius: 6px; background: var(--surface-2); color: var(--text); font-size: 10px; }
+
+@media (max-width: 760px) {
+  .import-source-card, .import-commit-card { grid-template-columns: minmax(0, 1fr); }
+  .import-source-card button, .import-commit-card button { width: 100%; justify-self: stretch; }
+  .import-stat-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .import-stat-grid span:nth-child(3) { border-right: 0; }
+  .import-stat-grid span:nth-child(-n+3) { border-bottom: 1px solid var(--border); }
+  .import-mapping-card > label { grid-template-columns: minmax(0, 1fr); }
+  .import-history article { grid-template-columns: minmax(0, 1fr) auto; }
+  .import-history article button { grid-column: 2; }
+}
+
 /* Settings keep the original Atherloom information density and typography. */
 body { font-size: calc(14px * var(--font-scale, 1)); font-weight: 400; -webkit-text-size-adjust: 100%; }
 .settings-panel {

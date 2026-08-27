@@ -5,14 +5,21 @@ import type {
   CasualGameResult,
   CasualGameResultRecord,
   CasualGameSession,
+  BullsAndCowsState,
   RegisteredCasualGameState,
   RockPaperScissorsChoice,
   RockPaperScissorsState,
   TicTacToeState,
+  TwentyQuestionsState,
 } from "../../features/games/types";
 
 const storageKey = "atherloom-react:standalone-casual-games:v1";
-const supportedGames = new Set<CasualGameId>(["tic_tac_toe", "rock_paper_scissors"]);
+const supportedGames = new Set<CasualGameId>([
+  "tic_tac_toe",
+  "rock_paper_scissors",
+  "bulls_and_cows",
+  "twenty_questions",
+]);
 const rpsChoices = new Set<RockPaperScissorsChoice>(["rock", "paper", "scissors"]);
 const winningLines = [
   [0, 1, 2], [3, 4, 5], [6, 7, 8],
@@ -20,8 +27,15 @@ const winningLines = [
   [0, 4, 8], [2, 4, 6],
 ] as const;
 
+interface PrivateBullsAndCowsState extends BullsAndCowsState {
+  user_secret: string;
+  persona_secret: string;
+}
+
+type StoredCasualGameState = RegisteredCasualGameState | PrivateBullsAndCowsState;
+
 interface StoredSession extends Omit<CasualGameSession<RegisteredCasualGameState>, "state" | "current_actor"> {
-  state: RegisteredCasualGameState;
+  state: StoredCasualGameState;
 }
 
 interface StoredResult extends CasualGameResultRecord {
@@ -136,26 +150,34 @@ function exactKeys(value: Record<string, unknown>, allowed: string[], label: str
 
 function supportedGameId(value: unknown): CasualGameId {
   const gameId = String(value || "") as CasualGameId;
-  if (!supportedGames.has(gameId)) throw new Error("当前只开放井字棋和猜拳");
+  if (!supportedGames.has(gameId)) throw new Error("当前只开放井字棋、猜拳、猜数字和二十问");
   return gameId;
 }
 
-function currentActor(state: RegisteredCasualGameState) {
+function currentActor(state: StoredCasualGameState) {
   return state.status === "active" && (state.turn === "user" || state.turn === "persona") ? state.turn : null;
 }
 
 function publicState(session: StoredSession): RegisteredCasualGameState {
-  if (session.game_id !== "rock_paper_scissors") return structuredCopy(session.state);
-  const state = session.state as RockPaperScissorsState;
-  if (state.status === "active" && state.turn === "persona") {
-    return {
-      status: state.status,
-      turn: state.turn,
-      persona_choice: null,
-      user_choice_committed: true,
-    } satisfies RockPaperScissorsState;
+  if (session.game_id === "bulls_and_cows") {
+    const state = structuredCopy(session.state) as Partial<PrivateBullsAndCowsState>;
+    delete state.user_secret;
+    delete state.persona_secret;
+    return state as BullsAndCowsState;
   }
-  return structuredCopy(state);
+  if (session.game_id === "rock_paper_scissors") {
+    const state = session.state as RockPaperScissorsState;
+    if (state.status === "active" && state.turn === "persona") {
+      return {
+        status: state.status,
+        turn: state.turn,
+        persona_choice: null,
+        user_choice_committed: true,
+      } satisfies RockPaperScissorsState;
+    }
+    return structuredCopy(state);
+  }
+  return structuredCopy(session.state as RegisteredCasualGameState);
 }
 
 function structuredCopy<T>(value: T): T {
@@ -194,7 +216,26 @@ function behaviorConfig(store: StandaloneCasualGameStore, personaId: string, gam
   };
 }
 
-function createInitialState(gameId: CasualGameId, optionsValue: unknown): RegisteredCasualGameState {
+function requireDistinctDigits(value: unknown, label: string) {
+  const digits = typeof value === "string" ? value : "";
+  if (!/^[0-9]{4}$/.test(digits) || new Set(digits).size !== 4) {
+    throw new Error(`${label}必须是四位互不重复的数字`);
+  }
+  return digits;
+}
+
+function randomDistinctDigits() {
+  const digits = [..."0123456789"];
+  for (let index = digits.length - 1; index > 0; index -= 1) {
+    const random = new Uint32Array(1);
+    crypto.getRandomValues(random);
+    const swapIndex = random[0] % (index + 1);
+    [digits[index], digits[swapIndex]] = [digits[swapIndex], digits[index]];
+  }
+  return digits.slice(0, 4).join("");
+}
+
+function createInitialState(gameId: CasualGameId, optionsValue: unknown): StoredCasualGameState {
   const options = optionsValue === undefined ? {} : objectOf(optionsValue, "options");
   if (gameId === "tic_tac_toe") {
     exactKeys(options, ["first_actor"], "options");
@@ -202,8 +243,31 @@ function createInitialState(gameId: CasualGameId, optionsValue: unknown): Regist
     if (firstActor !== "user" && firstActor !== "persona") throw new Error("first_actor 必须是 user 或 persona");
     return { status: "active", turn: firstActor, board: Array(9).fill(null), move_count: 0 } satisfies TicTacToeState;
   }
+  if (gameId === "rock_paper_scissors") {
+    exactKeys(options, [], "options");
+    return { status: "active", turn: "user", user_choice: null, persona_choice: null } satisfies RockPaperScissorsState;
+  }
+  if (gameId === "bulls_and_cows") {
+    exactKeys(options, ["user_secret"], "options");
+    const userSecret = requireDistinctDigits(options.user_secret, "秘密数字");
+    return {
+      status: "active",
+      turn: "user",
+      round: 1,
+      history: [],
+      user_secret: userSecret,
+      persona_secret: randomDistinctDigits(),
+    } satisfies PrivateBullsAndCowsState;
+  }
   exactKeys(options, [], "options");
-  return { status: "active", turn: "user", user_choice: null, persona_choice: null } satisfies RockPaperScissorsState;
+  return {
+    status: "active",
+    turn: "persona",
+    question_count: 0,
+    max_questions: 20,
+    pending: null,
+    transcript: [],
+  } satisfies TwentyQuestionsState;
 }
 
 export function createStandaloneCasualGameSession(
@@ -270,6 +334,15 @@ function resultFrom(
   };
 }
 
+function scoreBullsAndCows(secret: string, guess: string) {
+  let bulls = 0;
+  for (let index = 0; index < secret.length; index += 1) {
+    if (secret[index] === guess[index]) bulls += 1;
+  }
+  const cows = [...guess].filter((digit) => secret.includes(digit)).length - bulls;
+  return { bulls, cows };
+}
+
 function applyAction(session: StoredSession, actor: "user" | "persona", actionValue: unknown) {
   if (session.status !== "active") throw new Error("这局游戏已经结束");
   if (currentActor(session.state) !== actor) throw new Error("当前不是这个参与者的回合");
@@ -303,30 +376,142 @@ function applyAction(session: StoredSession, actor: "user" | "persona", actionVa
     return { action, events, result };
   }
 
-  exactKeys(action, ["choice"], "action");
-  const choice = action.choice as RockPaperScissorsChoice;
-  if (!rpsChoices.has(choice)) throw new Error("猜拳只能选择石头、布或剪刀");
-  const state = session.state as RockPaperScissorsState;
-  if (actor === "user") {
-    session.state = { status: "active", turn: "persona", user_choice: choice, persona_choice: null };
-    return { action, events: [{ type: "choice_committed", actor: "user" }], result: null };
+  if (session.game_id === "rock_paper_scissors") {
+    exactKeys(action, ["choice"], "action");
+    const choice = action.choice as RockPaperScissorsChoice;
+    if (!rpsChoices.has(choice)) throw new Error("猜拳只能选择石头、布或剪刀");
+    const state = session.state as RockPaperScissorsState;
+    if (actor === "user") {
+      session.state = { status: "active", turn: "persona", user_choice: choice, persona_choice: null };
+      return { action, events: [{ type: "choice_committed", actor: "user" }], result: null };
+    }
+    const userChoice = state.user_choice;
+    if (!userChoice || !rpsChoices.has(userChoice)) throw new Error("用户选择尚未提交");
+    const beats: Record<RockPaperScissorsChoice, RockPaperScissorsChoice> = { rock: "scissors", paper: "rock", scissors: "paper" };
+    const outcome = userChoice === choice ? "draw" : beats[userChoice] === choice ? "user_win" : "persona_win";
+    const winner = outcome === "draw" ? "draw" : outcome === "user_win" ? "user" : "persona";
+    const score = { user: outcome === "user_win" ? 1 : 0, persona: outcome === "persona_win" ? 1 : 0 };
+    const finishedAt = now();
+    session.state = { status: "finished", turn: null, user_choice: userChoice, persona_choice: choice };
+    return {
+      action,
+      events: [
+        { type: "choices_revealed", user_choice: userChoice, persona_choice: choice },
+        { type: "game_finished", outcome, winner },
+      ],
+      result: resultFrom(session, outcome, score, [`user:${userChoice}`, `persona:${choice}`], finishedAt),
+    };
   }
-  const userChoice = state.user_choice;
-  if (!userChoice || !rpsChoices.has(userChoice)) throw new Error("用户选择尚未提交");
-  const beats: Record<RockPaperScissorsChoice, RockPaperScissorsChoice> = { rock: "scissors", paper: "rock", scissors: "paper" };
-  const outcome = userChoice === choice ? "draw" : beats[userChoice] === choice ? "user_win" : "persona_win";
-  const winner = outcome === "draw" ? "draw" : outcome === "user_win" ? "user" : "persona";
-  const score = { user: outcome === "user_win" ? 1 : 0, persona: outcome === "persona_win" ? 1 : 0 };
-  const finishedAt = now();
-  session.state = { status: "finished", turn: null, user_choice: userChoice, persona_choice: choice };
-  return {
-    action,
-    events: [
-      { type: "choices_revealed", user_choice: userChoice, persona_choice: choice },
-      { type: "game_finished", outcome, winner },
-    ],
-    result: resultFrom(session, outcome, score, [`user:${userChoice}`, `persona:${choice}`], finishedAt),
-  };
+
+  if (session.game_id === "bulls_and_cows") {
+    exactKeys(action, ["guess"], "action");
+    const guess = requireDistinctDigits(action.guess, "猜测");
+    const state = session.state as PrivateBullsAndCowsState;
+    const secret = actor === "user" ? state.persona_secret : state.user_secret;
+    const { bulls, cows } = scoreBullsAndCows(secret, guess);
+    const entry = { actor, guess, bulls, cows, round: state.round };
+    const history = [...state.history, entry];
+    const events: Array<Record<string, unknown>> = [{ type: "guess_scored", ...entry }];
+    if (bulls === 4) {
+      const outcome = actor === "user" ? "user_win" : "persona_win";
+      session.state = { ...state, status: "finished", turn: null, history };
+      events.push({ type: "game_finished", outcome, winner: actor });
+      return {
+        action,
+        events,
+        result: resultFrom(
+          session,
+          outcome,
+          { user: actor === "user" ? 1 : 0, persona: actor === "persona" ? 1 : 0 },
+          [`solved_in_round:${state.round}`],
+          now(),
+        ),
+      };
+    }
+    session.state = {
+      ...state,
+      turn: actor === "user" ? "persona" : "user",
+      round: actor === "persona" ? state.round + 1 : state.round,
+      history,
+    };
+    return { action, events, result: null };
+  }
+
+  const state = session.state as TwentyQuestionsState;
+  if (actor === "persona") {
+    exactKeys(action, ["kind", "text"], "action");
+    const kind = action.kind;
+    const text = typeof action.text === "string" ? action.text.trim() : "";
+    if (kind !== "question" && kind !== "guess") throw new Error("二十问行动必须是提问或猜答案");
+    if (!text) throw new Error("二十问的问题或答案不能为空");
+    if (state.question_count >= state.max_questions) throw new Error("二十问次数已经用完");
+    const ordinal = state.question_count + 1;
+    const pending: NonNullable<TwentyQuestionsState["pending"]> = {
+      kind: kind as "question" | "guess",
+      text,
+      ordinal,
+    };
+    session.state = {
+      ...state,
+      turn: "user",
+      question_count: ordinal,
+      pending,
+      transcript: [...state.transcript, pending],
+    };
+    return {
+      action,
+      events: [{ type: kind === "question" ? "question_asked" : "guess_made", text, ordinal }],
+      result: null,
+    };
+  }
+
+  const pending = state.pending;
+  if (!pending) throw new Error("当前没有等待用户回答的问题");
+  const transcript = [...state.transcript];
+  const latest = transcript[transcript.length - 1];
+  const events: Array<Record<string, unknown>> = [];
+  if (pending.kind === "question") {
+    exactKeys(action, ["answer"], "action");
+    const answer = action.answer;
+    if (answer !== "yes" && answer !== "no" && answer !== "unknown") throw new Error("回答必须是 yes、no 或 unknown");
+    transcript[transcript.length - 1] = { ...latest, answer };
+    events.push({ type: "question_answered", answer, ordinal: pending.ordinal });
+    if (pending.ordinal >= state.max_questions) {
+      session.state = { ...state, status: "finished", turn: null, pending: null, transcript };
+      events.push({ type: "game_finished", outcome: "user_win", winner: "user" });
+      return {
+        action,
+        events,
+        result: resultFrom(session, "user_win", { user: 1, persona: 0 }, ["question_limit_reached"], now()),
+      };
+    }
+  } else {
+    exactKeys(action, ["verdict"], "action");
+    const verdict = action.verdict;
+    if (verdict !== "correct" && verdict !== "incorrect") throw new Error("判断必须是 correct 或 incorrect");
+    transcript[transcript.length - 1] = { ...latest, verdict };
+    events.push({ type: "guess_judged", verdict, ordinal: pending.ordinal });
+    if (verdict === "correct") {
+      session.state = { ...state, status: "finished", turn: null, pending: null, transcript };
+      events.push({ type: "game_finished", outcome: "persona_win", winner: "persona" });
+      return {
+        action,
+        events,
+        result: resultFrom(session, "persona_win", { user: 0, persona: 1 }, [`guessed_on_question:${pending.ordinal}`], now()),
+      };
+    }
+    if (pending.ordinal >= state.max_questions) {
+      session.state = { ...state, status: "finished", turn: null, pending: null, transcript };
+      events.push({ type: "game_finished", outcome: "user_win", winner: "user" });
+      return {
+        action,
+        events,
+        result: resultFrom(session, "user_win", { user: 1, persona: 0 }, ["question_limit_reached"], now()),
+      };
+    }
+  }
+  session.state = { ...state, turn: "persona", pending: null, transcript };
+  return { action, events, result: null };
 }
 
 function existingAction(
@@ -432,7 +617,19 @@ async function personaTurn(sessionId: string, bodyValue: unknown, runtime: Stand
   const visible = publicSession(session);
   const actionSchema = session.game_id === "tic_tac_toe"
     ? { type: "object", properties: { position: { type: "integer", minimum: 0, maximum: 8 } }, required: ["position"], additionalProperties: false }
-    : { type: "object", properties: { choice: { type: "string", enum: ["rock", "paper", "scissors"] } }, required: ["choice"], additionalProperties: false };
+    : session.game_id === "rock_paper_scissors"
+      ? { type: "object", properties: { choice: { type: "string", enum: ["rock", "paper", "scissors"] } }, required: ["choice"], additionalProperties: false }
+      : session.game_id === "bulls_and_cows"
+        ? { type: "object", properties: { guess: { type: "string", pattern: "^(?!.*([0-9]).*\\1)[0-9]{4}$" } }, required: ["guess"], additionalProperties: false }
+        : {
+          type: "object",
+          properties: {
+            kind: { type: "string", enum: ["question", "guess"] },
+            text: { type: "string", minLength: 1 },
+          },
+          required: ["kind", "text"],
+          additionalProperties: false,
+        };
   const action = await runtime.choosePersonaAction({
     session: visible,
     public_state: visible.state,
@@ -451,6 +648,20 @@ async function personaTurn(sessionId: string, bodyValue: unknown, runtime: Stand
 function gameMemoryText(session: StoredSession, result: CasualGameResult) {
   const outcome = result.outcome === "user_win" ? "用户获胜" : result.outcome === "persona_win" ? "我获胜" : "平局";
   if (session.game_id === "tic_tac_toe") return { title: "与用户完成一局井字棋", content: `我和用户完成了一局井字棋，结果是${outcome}。` };
+  if (session.game_id === "bulls_and_cows") {
+    const state = session.state as PrivateBullsAndCowsState;
+    return {
+      title: "与用户完成一局猜数字",
+      content: `我和用户完成了一局猜数字，共进行了${state.round}轮，结果是${outcome}。`,
+    };
+  }
+  if (session.game_id === "twenty_questions") {
+    const state = session.state as TwentyQuestionsState;
+    return {
+      title: "与用户完成一局二十问",
+      content: `我和用户完成了一局二十问，共问了${state.question_count}次，结果是${outcome}。`,
+    };
+  }
   const names: Record<string, string> = { rock: "石头", paper: "布", scissors: "剪刀" };
   const state = session.state as RockPaperScissorsState;
   return {
@@ -481,7 +692,12 @@ export async function requestStandaloneCasualGameJson<T>(
   const method = String(init.method || "GET").toUpperCase();
   const body = typeof init.body === "string" && init.body ? JSON.parse(init.body) as Record<string, unknown> : {};
   if (path === "/api/casual-games" && method === "GET") {
-    return { games: [{ id: "tic_tac_toe", label: "井字棋", rules_version: 1 }, { id: "rock_paper_scissors", label: "猜拳", rules_version: 1 }] } as T;
+    return { games: [
+      { id: "tic_tac_toe", label: "井字棋", rules_version: 1 },
+      { id: "rock_paper_scissors", label: "猜拳", rules_version: 1 },
+      { id: "bulls_and_cows", label: "猜数字", rules_version: 1 },
+      { id: "twenty_questions", label: "二十问", rules_version: 1 },
+    ] } as T;
   }
   if (path.startsWith("/api/casual-games/sessions?") && method === "GET") {
     const url = new URL(path, "https://standalone.atherloom.local");

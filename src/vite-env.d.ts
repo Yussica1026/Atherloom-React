@@ -5,6 +5,7 @@ interface AtherloomNativeBridge {
   setBackendUrl(value: string): string;
   apiRequest(method: string, path: string, body: string): string;
   apiRequestAsync?(method: string, path: string, body: string, callbackId: string): void;
+  previewImportFileAsync?(sourceName: string, callbackId: string): void;
   getClipboard?(): string;
   setClipboard?(value: string): string;
   saveProvider?(raw: string): string;

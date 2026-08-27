@@ -10,6 +10,8 @@ SMOKES = (
     "react_longworld_gm_smoke.py",
     "react_casual_game_smoke.py",
     "react_casual_rps_smoke.py",
+    "react_casual_four_smoke.py",
+    "standalone_external_import_smoke.py",
 )
 
 

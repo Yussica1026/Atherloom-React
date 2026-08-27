@@ -28,6 +28,7 @@ import { ToolsSettings } from "./ToolsSettings";
 import { RuntimeSettings } from "./RuntimeSettings";
 import { VoiceSettings } from "./VoiceSettings";
 import { AutomationSettings } from "./AutomationSettings";
+import { ExternalImportSettings } from "../imports/ExternalImportSettings";
 
 interface SettingsPanelProps {
   open: boolean;
@@ -64,9 +65,10 @@ interface SettingsPanelProps {
   onDeleteMcpServer: (id: string) => Promise<void>;
   onTestMcpServer: (draft: McpServerDraft) => Promise<{ message: string }>;
   onRefreshMcpServer: (id: string) => Promise<unknown>;
+  onImportCommitted: () => Promise<unknown>;
 }
 
-export type SettingsTab = "connection" | "providers" | "personas" | "worldbooks" | "summary" | "memory" | "automation" | "mcp" | "tools" | "voice" | "runtime" | "backup" | "appearance";
+export type SettingsTab = "connection" | "providers" | "personas" | "worldbooks" | "summary" | "memory" | "automation" | "mcp" | "tools" | "voice" | "runtime" | "imports" | "backup" | "appearance";
 
 const tabs: Array<{ value: SettingsTab; label: string }> = [
   { value: "connection", label: "后端连接" },
@@ -80,6 +82,7 @@ const tabs: Array<{ value: SettingsTab; label: string }> = [
   { value: "tools", label: "工具与权限" },
   { value: "voice", label: "语音通话" },
   { value: "runtime", label: "插件中心" },
+  { value: "imports", label: "外部对话导入" },
   { value: "backup", label: "备份与恢复" },
   { value: "appearance", label: "外观" },
 ];
@@ -137,6 +140,7 @@ export function SettingsPanel({
   onDeleteMcpServer,
   onTestMcpServer,
   onRefreshMcpServer,
+  onImportCommitted,
 }: SettingsPanelProps) {
   const [tab, setTab] = useState<SettingsTab>(initialTab);
   const [connectionStatus, setConnectionStatus] = useState("");
@@ -291,6 +295,14 @@ export function SettingsPanel({
             {tab === "voice" ? <VoiceSettings settings={settings} onSave={onSettingsChange} /> : null}
 
             {tab === "runtime" ? <RuntimeSettings personaKey={personaId || "__default__"} personas={personas} providers={providers} worldbooks={worldbooks} mcpServers={mcpServers} onOpenMemory={() => setTab("memory")} onOpenMcp={() => setTab("mcp")} onOpenTools={() => setTab("tools")} /> : null}
+
+            {tab === "imports" ? <ExternalImportSettings
+              personas={personas}
+              connected={Boolean(apiBase) || Boolean(window.AtherloomNative && !window.AtherloomNative.getBackendUrl())}
+              onOpenConnection={() => setTab("connection")}
+              onCreatePersona={onCreatePersona}
+              onCommitted={onImportCommitted}
+            /> : null}
 
             {tab === "backup" ? <BackupSettings onExport={onExportBackup} onRestore={onRestoreBackup} /> : null}
 

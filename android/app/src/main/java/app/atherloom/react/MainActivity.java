@@ -51,6 +51,7 @@ public class MainActivity extends Activity {
     private NativeSpeechController speechController;
     private MiniMaxSpeechController miniMaxSpeechController;
     private ValueCallback<Uri[]> fileChooserCallback;
+    private Uri lastOpenedFileUri;
     private PermissionRequest pendingMediaPermission;
     private byte[] pendingSaveData;
     private String pendingSaveCallbackId;
@@ -259,7 +260,9 @@ public class MainActivity extends Activity {
         if (requestCode == REQUEST_OPEN_FILE) {
             ValueCallback<Uri[]> callback = fileChooserCallback;
             fileChooserCallback = null;
-            if (callback != null) callback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data));
+            Uri[] selected = WebChromeClient.FileChooserParams.parseResult(resultCode, data);
+            lastOpenedFileUri = selected != null && selected.length > 0 ? selected[0] : null;
+            if (callback != null) callback.onReceiveValue(selected);
             return;
         }
         if (requestCode != REQUEST_SAVE_FILE) return;
@@ -539,6 +542,20 @@ public class MainActivity extends Activity {
                 String result = apiRequest(method, path, body);
                 emitRequestResult(callbackId, result);
             }, "atherloom-api-request").start();
+        }
+
+        @JavascriptInterface
+        public void previewImportFileAsync(String sourceName, String callbackId) {
+            Uri selectedUri = activity.lastOpenedFileUri;
+            new Thread(() -> {
+                String result;
+                if (selectedUri == null) {
+                    result = failure("没有可读取的导入文件，请重新选择");
+                } else {
+                    result = uploadImportFile(selectedUri, sourceName);
+                }
+                emitRequestResult(callbackId, result);
+            }, "atherloom-import-upload").start();
         }
 
         @JavascriptInterface
@@ -1089,6 +1106,49 @@ public class MainActivity extends Activity {
             return connection;
         }
 
+        private String uploadImportFile(Uri selectedUri, String sourceName) {
+            HttpURLConnection connection = null;
+            try {
+                String base = getBackendUrl();
+                if (base.isEmpty()) throw new Exception("请先在设置中填写 FastAPI 后端地址");
+                String safeName = sourceName == null || sourceName.trim().isEmpty()
+                    ? "external-export.zip"
+                    : sourceName.trim();
+                String path = "/api/imports/preview-file?source_name=" + Uri.encode(safeName);
+                connection = (HttpURLConnection) new URL(base + path).openConnection();
+                connection.setRequestMethod("POST");
+                connection.setConnectTimeout(25000);
+                connection.setReadTimeout(600000);
+                connection.setRequestProperty("Accept", "application/json");
+                connection.setRequestProperty("Content-Type", "application/octet-stream");
+                connection.setDoOutput(true);
+                connection.setChunkedStreamingMode(64 * 1024);
+                try (
+                    InputStream input = activity.getContentResolver().openInputStream(selectedUri);
+                    OutputStream output = connection.getOutputStream()
+                ) {
+                    if (input == null) throw new Exception("系统无法读取所选导入文件");
+                    byte[] buffer = new byte[64 * 1024];
+                    int count;
+                    while ((count = input.read(buffer)) >= 0) {
+                        if (count > 0) output.write(buffer, 0, count);
+                    }
+                }
+                int status = connection.getResponseCode();
+                String response = read(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
+                JSONObject result = new JSONObject()
+                    .put("ok", status >= 200 && status < 300)
+                    .put("status", status)
+                    .put("body", response);
+                if (status < 200 || status >= 300) result.put("error", httpError(status, response));
+                return result.toString();
+            } catch (Exception error) {
+                return failure(error.getMessage());
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        }
+
         private static String normalizeBackendUrl(String raw) throws Exception {
             String value = raw == null ? "" : raw.trim().replaceAll("/+$", "");
             if (value.isEmpty()) return "";
@@ -1196,6 +1256,7 @@ public class MainActivity extends Activity {
         fileChooserCallback = null;
         pendingSaveData = null;
         pendingSaveCallbackId = null;
+        lastOpenedFileUri = null;
         if (webView != null) {
             webView.stopLoading();
             webView.removeJavascriptInterface("AtherloomNative");

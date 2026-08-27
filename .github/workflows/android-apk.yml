@@ -43,8 +43,10 @@ jobs:
           android.tests.test_provider_http_policy
           android.tests.test_voice_contract
           tests.react_casual_games_contracts
+          tests.react_external_import_contracts
           tests.react_longworld_contracts
           tests.react_regression_contracts
+          tests.react_standalone_casual_four_contracts
           tests.release_contracts
           -v
       - uses: gradle/actions/setup-gradle@v6

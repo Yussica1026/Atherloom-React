@@ -19,11 +19,16 @@ function resultPath(resultId: string) {
 }
 
 export const casualGameApi = {
-  createSession: (gameId: string, conversationId: string, idempotencyKey: string) =>
+  createSession: (
+    gameId: string,
+    conversationId: string,
+    idempotencyKey: string,
+    options: Record<string, unknown> = {},
+  ) =>
     requestJson<CasualGameSession<RegisteredCasualGameState>>("/api/casual-games/sessions", {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
-      body: JSON.stringify({ game_id: gameId, conversation_id: conversationId, options: {} }),
+      body: JSON.stringify({ game_id: gameId, conversation_id: conversationId, options }),
     }),
 
   listSessions: (conversationId: string, status = "active") =>

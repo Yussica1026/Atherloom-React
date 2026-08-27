@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { getGameRegistration } from "./GameRegistry";
 import { useGameSession } from "./hooks/useGameSession";
-import type { OpenGameEffect } from "./types";
+import type { OpenGameSessionEffect } from "./types";
 import "./games.css";
 
 interface GameOverlayProps {
-  effect: OpenGameEffect;
+  effect: OpenGameSessionEffect;
   personaName: string;
   conversationTitle: string;
   onClose: () => void;

@@ -9,12 +9,28 @@ export type CasualGameId = (typeof casualGameIds)[number];
 export type CasualGameActor = "user" | "persona";
 export type CasualGameStatus = "active" | "finished" | "abandoned";
 
-export interface OpenGameEffect {
+interface OpenGameEffectBase {
   type: "open_game";
   game_id: CasualGameId;
-  session_id: string;
   conversation_id: string;
   persona_id: string;
+}
+
+export interface OpenGameSessionEffect extends OpenGameEffectBase {
+  session_id: string;
+  setup_required?: false;
+}
+
+export interface OpenGameSetupEffect extends OpenGameEffectBase {
+  game_id: "bulls_and_cows";
+  setup_required: true;
+  session_id?: never;
+}
+
+export type OpenGameEffect = OpenGameSessionEffect | OpenGameSetupEffect;
+
+export function isOpenGameSessionEffect(effect: OpenGameEffect): effect is OpenGameSessionEffect {
+  return typeof effect.session_id === "string" && Boolean(effect.session_id.trim());
 }
 
 export function parseOpenGameEffect(value: unknown): OpenGameEffect | null {
@@ -22,7 +38,18 @@ export function parseOpenGameEffect(value: unknown): OpenGameEffect | null {
   const effect = value as Record<string, unknown>;
   if (effect.type !== "open_game") return null;
   if (!casualGameIds.includes(effect.game_id as CasualGameId)) return null;
-  if (![effect.session_id, effect.conversation_id, effect.persona_id].every((item) => typeof item === "string" && item.trim())) return null;
+  if (![effect.conversation_id, effect.persona_id].every((item) => typeof item === "string" && item.trim())) return null;
+  if (effect.setup_required === true) {
+    if (effect.game_id !== "bulls_and_cows") return null;
+    return {
+      type: "open_game",
+      game_id: "bulls_and_cows",
+      setup_required: true,
+      conversation_id: String(effect.conversation_id),
+      persona_id: String(effect.persona_id),
+    };
+  }
+  if (typeof effect.session_id !== "string" || !effect.session_id.trim()) return null;
   return {
     type: "open_game",
     game_id: effect.game_id as CasualGameId,
@@ -49,11 +76,53 @@ export interface RockPaperScissorsState {
   persona_choice?: RockPaperScissorsChoice | null;
 }
 
-export type RegisteredCasualGameState = TicTacToeState | RockPaperScissorsState;
+export interface BullsAndCowsHistoryEntry {
+  actor: CasualGameActor;
+  guess: string;
+  bulls: number;
+  cows: number;
+  round: number;
+}
+
+export interface BullsAndCowsState {
+  status: "active" | "finished" | "abandoned";
+  turn: CasualGameActor | null;
+  round: number;
+  history: BullsAndCowsHistoryEntry[];
+}
+
+export type TwentyQuestionsAnswer = "yes" | "no" | "unknown";
+export type TwentyQuestionsVerdict = "correct" | "incorrect";
+
+export interface TwentyQuestionsTranscriptEntry {
+  kind: "question" | "guess";
+  text: string;
+  ordinal: number;
+  answer?: TwentyQuestionsAnswer;
+  verdict?: TwentyQuestionsVerdict;
+}
+
+export interface TwentyQuestionsState {
+  status: "active" | "finished" | "abandoned";
+  turn: CasualGameActor | null;
+  question_count: number;
+  max_questions: number;
+  pending: TwentyQuestionsTranscriptEntry | null;
+  transcript: TwentyQuestionsTranscriptEntry[];
+}
+
+export type RegisteredCasualGameState =
+  | TicTacToeState
+  | RockPaperScissorsState
+  | BullsAndCowsState
+  | TwentyQuestionsState;
 
 export type CasualGameAction =
   | { position: number }
-  | { choice: RockPaperScissorsChoice };
+  | { choice: RockPaperScissorsChoice }
+  | { guess: string }
+  | { answer: TwentyQuestionsAnswer }
+  | { verdict: TwentyQuestionsVerdict };
 
 export interface CasualGameSession<State = Record<string, unknown>> {
   id: string;

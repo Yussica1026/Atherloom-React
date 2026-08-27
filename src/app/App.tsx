@@ -6,7 +6,7 @@ import { isFontName, isThemeName, type Attachment, type FontName, type Message, 
 import { Composer } from "../features/chat/Composer";
 import { MessageList } from "../features/chat/MessageList";
 import { VoiceCall } from "../features/chat/VoiceCall";
-import { parseOpenGameEffect, type OpenGameEffect } from "../features/games/types";
+import { isOpenGameSessionEffect, parseOpenGameEffect, type OpenGameSessionEffect, type OpenGameSetupEffect } from "../features/games/types";
 import { SettingsPanel, type SettingsTab } from "../features/settings/SettingsPanel";
 import { Sidebar } from "../features/shell/Sidebar";
 import { FeatureHub, type FeatureSpace } from "../features/spaces/FeatureHub";
@@ -70,7 +70,8 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("providers");
   const [featureSpace, setFeatureSpace] = useState<FeatureSpace | null>(null);
-  const [activeGame, setActiveGame] = useState<OpenGameEffect | null>(null);
+  const [activeGame, setActiveGame] = useState<OpenGameSessionEffect | null>(null);
+  const [pendingGameSetup, setPendingGameSetup] = useState<OpenGameSetupEffect | null>(null);
   const [callOpen, setCallOpen] = useState(false);
   const [compressOpen, setCompressOpen] = useState(false);
   const [compressRounds, setCompressRounds] = useState(1);
@@ -133,11 +134,17 @@ export default function App() {
     if (!effect) return;
     setSidebarOpen(false);
     setSettingsOpen(false);
-    setFeatureSpace(null);
+    setFeatureSpace(isOpenGameSessionEffect(effect) ? null : "games");
     setCallOpen(false);
     setCompressOpen(false);
     setChatStatusOpen(false);
-    setActiveGame(effect);
+    if (isOpenGameSessionEffect(effect)) {
+      setPendingGameSetup(null);
+      setActiveGame(effect);
+    } else {
+      setActiveGame(null);
+      setPendingGameSetup(effect);
+    }
   }, [workspace.consumeToolEffect, workspace.pendingToolEffects]);
 
   useEffect(() => {
@@ -145,7 +152,10 @@ export default function App() {
       if (activeGame) setActiveGame(null);
       else if (callOpen) setCallOpen(false);
       else if (compressOpen) setCompressOpen(false);
-      else if (featureSpace) setFeatureSpace(null);
+      else if (featureSpace) {
+        if (featureSpace === "games") setPendingGameSetup(null);
+        setFeatureSpace(null);
+      }
       else if (chatStatusOpen) setChatStatusOpen(false);
       else if (settingsOpen) setSettingsOpen(false);
       else if (sidebarOpen) setSidebarOpen(false);
@@ -540,6 +550,7 @@ export default function App() {
         onDeleteMcpServer={workspace.deleteMcpServer}
         onTestMcpServer={workspace.testMcpServer}
         onRefreshMcpServer={workspace.refreshMcpServer}
+        onImportCommitted={workspace.retry}
       />
       {featureSpace === "longworld" ? <Suspense fallback={<div className="dialog-layer"><section className="compact-dialog"><p>正在打开长期世界引擎…</p></section></div>}><LongWorldHub
           personas={workspace.personas}
@@ -552,12 +563,17 @@ export default function App() {
           }}
         /></Suspense> : null}
       {featureSpace === "games" ? <Suspense fallback={<div className="dialog-layer"><section className="compact-dialog"><p>正在打开休闲游戏…</p></section></div>}><GameHub
-        conversationId={workspace.currentId}
-        conversationTitle={workspace.currentConversation?.title || "当前对话"}
-        personaId={workspace.currentConversation?.persona_id || workspace.personaId || "__default__"}
-        personaName={workspace.personas.find((item) => item.id === (workspace.currentConversation?.persona_id || workspace.personaId))?.name || "默认人格"}
-        onClose={() => setFeatureSpace(null)}
+        conversationId={pendingGameSetup?.conversation_id || workspace.currentId}
+        conversationTitle={workspace.conversations.find((item) => item.id === pendingGameSetup?.conversation_id)?.title || workspace.currentConversation?.title || "当前对话"}
+        personaId={pendingGameSetup?.persona_id || workspace.currentConversation?.persona_id || workspace.personaId || "__default__"}
+        personaName={workspace.personas.find((item) => item.id === (pendingGameSetup?.persona_id || workspace.currentConversation?.persona_id || workspace.personaId))?.name || "默认人格"}
+        requestedGameId={pendingGameSetup?.game_id || null}
+        onClose={() => {
+          setPendingGameSetup(null);
+          setFeatureSpace(null);
+        }}
         onOpenGame={(effect) => {
+          setPendingGameSetup(null);
           setFeatureSpace(null);
           setActiveGame(effect);
         }}

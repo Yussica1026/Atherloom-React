@@ -270,7 +270,7 @@ def run() -> None:
         page.on("pageerror", lambda error: page_errors.append(str(error)))
         page.on("response", lambda response: http_errors.append(f"{response.status} {response.url}") if response.status >= 400 else None)
 
-        page.goto(BASE_URL, wait_until="networkidle")
+        page.goto(BASE_URL, wait_until="networkidle", timeout=30_000)
         composer = page.get_by_role("textbox", name="消息")
         composer.wait_for()
         composer.fill("陪我玩猜拳")

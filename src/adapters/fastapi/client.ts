@@ -149,6 +149,15 @@ function requestNativeJson<T>(method: string, path: string, body: string): Promi
   return requestNativeCallback<T>(callbackId, () => bridge.apiRequestAsync?.(method, path, body, callbackId));
 }
 
+export function requestNativeImportPreview<T>(sourceName: string): Promise<T> {
+  const bridge = window.AtherloomNative;
+  if (!bridge?.previewImportFileAsync) {
+    return Promise.reject(new Error("当前 APK 不支持大文件导入，请安装最新版本"));
+  }
+  const callbackId = `import-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return requestNativeCallback<T>(callbackId, () => bridge.previewImportFileAsync?.(sourceName, callbackId));
+}
+
 function requestNativeCallback<T>(callbackId: string, start: () => void): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     nativeRequests.set(callbackId, {

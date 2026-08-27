@@ -29,7 +29,9 @@ Atherloom React 是现有 Atherloom 前端的组件化重建。它保留原来�
 - 消息复制、珍藏、修改、重新 Roll、回答版本切换、分支、删除单版本/全部版本，以及脱敏 Markdown 导出。
 - 自动总结、Token/轮数压缩、主动压缩、记忆生命周期、搜索与工具权限、MCP 管理、九维动机、右上角人格状态卡和数据健康。
 - 图片/PDF/文本附件、结构化问题选项卡、快捷短语、会话世界书、输入状态，以及适配器化语音通话：Android 原生/浏览器系统识别输入，系统或 MiniMax TTS 输出；MiniMax 当前只承担 TTS，真实 Android 手机仍待验收。
-- 珍藏、生活簿、联系人/信箱、用户日记、AI 独立/定时私人日记及审计、留言板、梦库、共读、共影、陪听和角色剧场。
+- 珍藏、生活簿、联系人/信箱、用户日记、AI 独立/定时私人日记及审计、留言板、梦库、共影、陪听和角色剧场。
+- 独立本地书库与 Cove Book Forge 能力移植：PDF / EPUB / TXT / Markdown 分章导入、阅读进度、书签笔记、同 Persona 结构化章节分析、确定性缓存、可暂停/继续/取消的整书任务，以及分析 JSON / Agent Skill ZIP 导出。
+- 设置中的本机后台日志：集中查看页面异常、未处理异步错误、接口失败、书籍导入/分析与后台任务记录，并可筛选、复制、导出或清空。
 - 用户可查看、修改、批准和停用的自动唤醒任务，以及按人格隔离、按次授权的子代理委托；任务只在应用前台运行，应用关闭后于下次打开补做，不冒充系统后台常驻服务。
 - 可安装 PWA 离线壳，以及 Android 系统返回键浮层层级。
 
@@ -58,9 +60,9 @@ npm run dev
 
 Android 客户端使用独立包名 `app.atherloom.react`，不会覆盖旧版 Atherloom。APK 内置 React 页面，默认使用本机模式：API Key 通过 Android 加密存储保管，设置和聊天数据留在当前设备，模型请求通过原生桥直接发往所填线路。
 
-当前固定签名版：[`v0.2.5 免登录直接下载 APK`](https://github.com/Yussica1026/Atherloom-React/releases/download/v0.2.5/Atherloom-React-Android-release.apk)。
+当前固定签名版：[`v0.2.6 免登录直接下载 APK`](https://github.com/Yussica1026/Atherloom-React/releases/download/v0.2.6/Atherloom-React-Android-release.apk)。
 
-`v0.2.5` 在既有语音、MiniMax TTS、多字体、日记 / 留言板 / 梦库、自动唤醒和人格子代理基础上，新增无需电脑后端的同 Persona 井字棋与猜拳完整链路。
+`v0.2.6` 在既有语音、MiniMax TTS、多字体、日记 / 留言板 / 梦库、自动唤醒和人格子代理基础上，加入 ChatGPT、Claude、Kelivo、AstrBot 外部对话导入，四款同 Persona 休闲游戏，以及本地书库、章节分析、整书断点任务、Agent Skill 导出和后台日志。
 
 需要共用现有 FastAPI/SQLite 时，可进入“设置 → 后端连接”填写电脑或服务器地址，例如 `http://192.168.1.20:8876`；清空地址并保存即可切回本机模式。详细说明见 [Android 构建说明](android/README.md)。
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fastApi, streamChat } from "../../adapters/fastapi/client";
+import { fastApi, generateNativeProviderText, streamChat } from "../../adapters/fastapi/client";
 import { isStandaloneAndroid } from "../../adapters/standalone/store";
+import type { BookModelGenerator, BookModelRequest } from "../books/types";
 import type {
   AppSettings,
   Attachment,
@@ -178,6 +179,26 @@ function parsePrivateJournal(value: string, personaName: string) {
   }
   if (!normalized) throw new Error("模型没有返回日记内容");
   return { title: `${personaName}的日记 · ${new Date().toLocaleDateString("zh-CN")}`, content: normalized.slice(0, 30000) };
+}
+
+function fastApiBookAnalysisContent(request: BookModelRequest) {
+  return JSON.stringify({
+    request_type: "atherloom_book_analysis",
+    application_protocol: {
+      source: "atherloom_application",
+      priority: "output_contract",
+      content: request.protocol_instructions,
+    },
+    user_book_instructions: {
+      source: "user",
+      content: request.user_instructions,
+    },
+    untrusted_book_source: {
+      source: "book_data",
+      treatment: "data_only",
+      content: request.source_payload,
+    },
+  });
 }
 
 export function useWorkspace() {
@@ -656,6 +677,54 @@ export function useWorkspace() {
     runGeneration(content, null, attachments, worldbookIds, typingContext)
   ), [runGeneration]);
 
+  const generateBookText = useCallback<BookModelGenerator>(async (request, signal) => {
+    const targetPersonaId = request.persona_key === "__default__" ? null : request.persona_key;
+    if (targetPersonaId !== personaId) throw new Error("这本书属于其他人格，已停止分析以防串线");
+    const targetPersona = targetPersonaId ? personas.find((item) => item.id === targetPersonaId) || null : null;
+    if (targetPersonaId && !targetPersona) throw new Error("书籍所属人格已不存在");
+    const targetProvider = providers.find((item) => item.id === request.provider_id && item.enabled !== false) || null;
+    if (!targetProvider) throw new Error("书籍分析选择的模型线路不可用");
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+    if (isStandaloneAndroid()) {
+      return generateNativeProviderText(request, signal, {
+        persona: targetPersona,
+        provider: targetProvider,
+      });
+    }
+
+    let temporary: Conversation | null = null;
+    let output = "";
+    try {
+      temporary = await fastApi.createConversation(targetProvider.id, targetPersonaId);
+      setPrivateCleanupIds(queuePrivateConversationCleanup(temporary.id));
+      await streamChat({
+        conversation_id: temporary.id,
+        content: fastApiBookAnalysisContent(request),
+        provider_id: targetProvider.id,
+        persona_id: targetPersonaId,
+        local_time: localTimeContext(),
+        attachments: [],
+        worldbook_ids: [],
+        typing_context: "",
+        thinking_enabled: targetProvider.thinking_enabled !== false,
+        writing_context_mode: "none",
+        tool_mode: "none",
+      }, signal, (event) => {
+        if (event.error) throw new Error(event.error);
+        output += event.delta || "";
+      });
+      const normalized = output.trim();
+      if (!normalized) throw new Error("模型没有返回书籍分析内容");
+      return normalized;
+    } finally {
+      if (temporary) {
+        await deletePrivateConversationOrQueue(temporary.id);
+        setPrivateCleanupIds(readPrivateConversationCleanupQueue());
+      }
+    }
+  }, [personaId, personas, providers]);
+
   const generatePrivateJournal = useCallback(async (targetPersonaKey: string, trigger: "manual" | "scheduled" | "catch_up", guidance = "", visibleToUser = false) => {
     if (busy) throw new Error("当前聊天正在生成，请稍后再写日记");
     if (privateGenerationRef.current) throw new Error("已有一篇私人日记正在生成");
@@ -1066,6 +1135,7 @@ export function useWorkspace() {
     exportBackup,
     restoreBackup,
     send,
+    generateBookText,
     generatePrivateJournal,
     generatePrivateDream,
     regenerateMessage,

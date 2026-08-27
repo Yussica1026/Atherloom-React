@@ -29,6 +29,7 @@ import { RuntimeSettings } from "./RuntimeSettings";
 import { VoiceSettings } from "./VoiceSettings";
 import { AutomationSettings } from "./AutomationSettings";
 import { ExternalImportSettings } from "../imports/ExternalImportSettings";
+import { DiagnosticsSettings } from "../diagnostics/DiagnosticsSettings";
 
 interface SettingsPanelProps {
   open: boolean;
@@ -68,7 +69,7 @@ interface SettingsPanelProps {
   onImportCommitted: () => Promise<unknown>;
 }
 
-export type SettingsTab = "connection" | "providers" | "personas" | "worldbooks" | "summary" | "memory" | "automation" | "mcp" | "tools" | "voice" | "runtime" | "imports" | "backup" | "appearance";
+export type SettingsTab = "connection" | "providers" | "personas" | "worldbooks" | "summary" | "memory" | "automation" | "mcp" | "tools" | "voice" | "runtime" | "imports" | "logs" | "backup" | "appearance";
 
 const tabs: Array<{ value: SettingsTab; label: string }> = [
   { value: "connection", label: "后端连接" },
@@ -83,6 +84,7 @@ const tabs: Array<{ value: SettingsTab; label: string }> = [
   { value: "voice", label: "语音通话" },
   { value: "runtime", label: "插件中心" },
   { value: "imports", label: "外部对话导入" },
+  { value: "logs", label: "后台日志" },
   { value: "backup", label: "备份与恢复" },
   { value: "appearance", label: "外观" },
 ];
@@ -303,6 +305,8 @@ export function SettingsPanel({
               onCreatePersona={onCreatePersona}
               onCommitted={onImportCommitted}
             /> : null}
+
+            {tab === "logs" ? <DiagnosticsSettings /> : null}
 
             {tab === "backup" ? <BackupSettings onExport={onExportBackup} onRestore={onRestoreBackup} /> : null}
 

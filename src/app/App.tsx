@@ -604,6 +604,7 @@ export default function App() {
             return "";
           }
         }}
+        onGenerateBookText={workspace.generateBookText}
         onGeneratePrivateJournal={workspace.generatePrivateJournal}
         onGeneratePrivateDream={workspace.generatePrivateDream}
       />

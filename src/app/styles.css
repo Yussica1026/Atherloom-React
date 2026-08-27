@@ -1350,3 +1350,124 @@ body { font-size: calc(14px * var(--font-scale, 1)); font-weight: 400; -webkit-t
   .automation-task-ledger::before { left: 4px; }
   .automation-task-card::before { left: -16px; }
 }
+
+/* Local background diagnostics: a compact, theme-bound runtime ledger. */
+.diagnostics-settings { display: grid; gap: 18px; }
+.diagnostics-settings .section-heading-with-action {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+.diagnostics-settings .section-heading-with-action .form-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.diagnostics-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.diagnostics-summary > span {
+  display: grid;
+  gap: 4px;
+  min-height: 78px;
+  align-content: center;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 5px 16px 16px 16px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 11px;
+}
+.diagnostics-summary strong { color: var(--text); font: 500 25px/1 var(--serif); }
+.diagnostics-toolbar {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.diagnostics-toolbar label { display: grid; gap: 6px; color: var(--muted); font-size: 11px; }
+.diagnostics-toolbar select,
+.diagnostics-toolbar input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 9px 11px;
+  outline: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+.diagnostics-toolbar select:focus-visible,
+.diagnostics-toolbar input:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 50%, var(--surface));
+  outline-offset: 2px;
+}
+.diagnostics-ledger { display: grid; gap: 10px; }
+.diagnostics-ledger > article {
+  position: relative;
+  overflow: hidden;
+  padding: 15px 17px 16px 20px;
+  border: 1px solid var(--border);
+  border-radius: 4px 15px 15px 4px;
+  background: var(--surface);
+}
+.diagnostics-ledger > article::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--accent);
+}
+.diagnostics-ledger > article[data-level="warning"]::before { background: color-mix(in srgb, var(--accent) 52%, var(--text)); }
+.diagnostics-ledger > article[data-level="error"]::before { background: var(--danger); }
+.diagnostics-ledger article > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+.diagnostics-ledger article > header span {
+  border-radius: 999px;
+  padding: 4px 7px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: .08em;
+}
+.diagnostics-ledger article > header strong { min-width: 0; overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.diagnostics-ledger article > header time { color: var(--muted); font-size: 10px; white-space: nowrap; }
+.diagnostics-ledger article > p { margin: 10px 0 0; color: var(--text); font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+.diagnostics-ledger details { margin-top: 10px; color: var(--muted); font-size: 11px; }
+.diagnostics-ledger summary { cursor: pointer; }
+.diagnostics-ledger pre {
+  max-height: 260px;
+  overflow: auto;
+  margin: 9px 0 0;
+  padding: 11px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: 400 11px/1.55 ui-monospace, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 680px) {
+  .diagnostics-settings .section-heading-with-action { display: grid; }
+  .diagnostics-settings .section-heading-with-action .form-actions { justify-content: flex-start; }
+  .diagnostics-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .diagnostics-summary > span { min-height: 68px; padding: 11px; }
+  .diagnostics-toolbar { grid-template-columns: minmax(0, 1fr); }
+  .diagnostics-toolbar > button { justify-self: start; min-height: 44px; }
+  .diagnostics-ledger article > header { grid-template-columns: auto minmax(0, 1fr); }
+  .diagnostics-ledger article > header time { grid-column: 2; }
+}

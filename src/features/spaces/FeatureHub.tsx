@@ -3,6 +3,8 @@ import { saveFile } from "../../adapters/native/files";
 import { fastApi, getApiBase, requestJson } from "../../adapters/fastapi/client";
 import { isStandaloneAndroid } from "../../adapters/standalone/store";
 import type { BoardRecord, DreamRecord, Favorite, JournalRecord, Persona, Provider, Worldbook } from "../../domain/types";
+import { BookForgeSpace } from "../books/BookForgeSpace";
+import type { BookModelGenerator } from "../books/types";
 import type { SettingsTab } from "../settings/SettingsPanel";
 
 export type FeatureSpace = "longworld" | "games" | "favorites" | "life" | "correspondence" | "reading" | "cinema" | "listening" | "roleplay" | "journal" | "board" | "dream";
@@ -237,6 +239,7 @@ interface FeatureHubProps {
   onOpenFavorite: (conversationId: string) => Promise<void>;
   onUnfavorite: (messageId: string) => Promise<void>;
   onSendToAssistant: (content: string) => Promise<string | undefined>;
+  onGenerateBookText: BookModelGenerator;
   onGeneratePrivateJournal: (personaKey: string, trigger: JournalTrigger, guidance: string, visibleToUser: boolean) => Promise<{ title: string; content: string }>;
   onGeneratePrivateDream: (personaKey: string) => Promise<{ title: string; content: string }>;
 }
@@ -250,7 +253,7 @@ function correspondenceStatusLabel(status: string) {
 }
 
 export function FeatureHub(props: FeatureHubProps) {
-  const { open, personaId, personas, providers, worldbooks, favorites, onClose, onChangeSpace, onOpenSettingsTab, onOpenFavorite, onUnfavorite, onSendToAssistant, onGeneratePrivateJournal, onGeneratePrivateDream } = props;
+  const { open, personaId, personas, providers, worldbooks, favorites, onClose, onChangeSpace, onOpenSettingsTab, onOpenFavorite, onUnfavorite, onSendToAssistant, onGenerateBookText, onGeneratePrivateJournal, onGeneratePrivateDream } = props;
   const [data, setData] = useState<SpaceData>(readData);
   const personaKey = personaId || "__default__";
   const personaName = personas.find((item) => item.id === personaId)?.name || "默认人格";
@@ -714,7 +717,15 @@ export function FeatureHub(props: FeatureHubProps) {
           {open === "journal" ? <WritingSpace mode="journal" {...shared} /> : null}
           {open === "board" ? <WritingSpace mode="board" {...shared} /> : null}
           {open === "dream" ? <WritingSpace mode="dream" {...shared} /> : null}
-          {open === "reading" ? <ReadingSpace {...shared} /> : null}
+          {open === "reading" ? <BookForgeSpace
+            personaKey={personaKey}
+            personaName={personaName}
+            providers={providers}
+            providerId={shared.providerId}
+            legacyBooks={data.books.filter((book) => book.persona_key === personaKey)}
+            onGenerate={onGenerateBookText}
+            onSendToAssistant={onSendToAssistant}
+          /> : null}
           {open === "cinema" ? <CinemaSpace {...shared} /> : null}
           {open === "listening" ? <ListeningSpace {...shared} /> : null}
           {open === "roleplay" ? <RoleplaySpace {...shared} worldbooks={worldbooks} /> : null}
@@ -1601,75 +1612,6 @@ function WritingSpace({ mode, data, personaKey, personaName, update, writingLoad
     </>}
   </section>;
 }
-async function readBookFile(file: File) {
-  const pdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
-  if (!pdf) {
-    if (file.size > 3 * 1024 * 1024) throw new Error("TXT / Markdown 单本暂限 3 MB");
-    const bytes = await file.arrayBuffer();
-    const utf8 = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-    const broken = (utf8.match(/�/g) || []).length;
-    if (!broken || broken / Math.max(1, utf8.length) < 0.002) return utf8;
-    try {
-      return new TextDecoder("gb18030", { fatal: false }).decode(bytes);
-    } catch {
-      return utf8;
-    }
-  }
-  if (file.size > 12 * 1024 * 1024) throw new Error("PDF 超过 12 MB，请先压缩或拆分后再打开");
-  type PdfPage = { getTextContent(): Promise<{ items: Array<{ str?: string }> }> };
-  type PdfDocument = { numPages: number; getPage(page: number): Promise<PdfPage> };
-  type PdfTask = { promise: Promise<PdfDocument>; destroy(): Promise<void> };
-  type PdfJs = { GlobalWorkerOptions: { workerSrc: string }; getDocument(input: { data: Uint8Array }): PdfTask };
-  const moduleUrl = new URL("./vendor/pdfjs/pdf.mjs", document.baseURI).href;
-  const workerUrl = new URL("./vendor/pdfjs/pdf.worker.mjs", document.baseURI).href;
-  const pdfjs = await import(/* @vite-ignore */ moduleUrl) as PdfJs;
-  pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-  const task = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
-  const documentProxy = await task.promise;
-  if (documentProxy.numPages > 400) {
-    await task.destroy();
-    throw new Error("PDF 超过 400 页，请拆分后再打开");
-  }
-  const parts: string[] = [];
-  let length = 0;
-  for (let pageNumber = 1; pageNumber <= documentProxy.numPages; pageNumber += 1) {
-    const page = await documentProxy.getPage(pageNumber);
-    const content = await page.getTextContent();
-    const text = content.items.map((item) => item.str || "").join(" ").trim();
-    parts.push(`第 ${pageNumber} 页\n${text}`);
-    length += text.length;
-    if (length > 500_000) break;
-  }
-  await task.destroy();
-  const text = parts.join("\n\n").slice(0, 500_000);
-  if (!text.trim()) throw new Error("PDF 没有可提取文字，可能是扫描图片版");
-  return text;
-}
-
-function ReadingSpace({ data, personaKey, update, onSendToAssistant }: SharedProps) {
-  const [activeId, setActiveId] = useState(data.books.find((item) => item.persona_key === personaKey)?.id || "");
-  const [annotation, setAnnotation] = useState("");
-  const readerRef = useRef<HTMLDivElement>(null);
-  const books = data.books.filter((item) => item.persona_key === personaKey);
-  const active = books.find((item) => item.id === activeId) || null;
-  const importBook = async (file: File) => {
-    const text = await readBookFile(file);
-    const stamp = now();
-    const book: BookState = { id: id("book"), persona_key: personaKey, created_at: stamp, updated_at: stamp, title: file.name.replace(/\.[^.]+$/, ""), text: text.slice(0, 500_000), progress: 0, bookmarks: [], annotations: [] };
-    update("books", [book, ...data.books]);
-    setActiveId(book.id);
-  };
-  const patchBook = (patch: Partial<BookState>) => {
-    if (!active) return;
-    update("books", data.books.map((item) => item.id === active.id ? { ...item, ...patch, updated_at: now() } : item));
-  };
-  const progress = () => {
-    const node = readerRef.current;
-    return node ? Math.round(node.scrollTop / Math.max(1, node.scrollHeight - node.clientHeight) * 100) : active?.progress || 0;
-  };
-  return <section className="space-section media-workspace"><aside className="media-library"><label className="primary-button file-button">导入 PDF / TXT / Markdown<input type="file" accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importBook(file).catch((error) => window.alert(error instanceof Error ? error.message : "书籍读取失败")); event.target.value = ""; }} /></label>{books.map((book) => <button type="button" className={book.id === active?.id ? "active" : ""} onClick={() => setActiveId(book.id)} key={book.id}><strong>{book.title}</strong><small>进度 {book.progress || 0}%</small></button>)}</aside><div className="media-main">{active ? <><header><div><h3>{active.title}</h3><p>正文留在本机；只把你主动询问时附近的片段发给模型。</p></div><div><button type="button" onClick={() => patchBook({ bookmarks: [...active.bookmarks, { id: id("bookmark"), label: `${progress()}% 处`, progress: progress() }] })}>加书签</button><button type="button" onClick={() => void onSendToAssistant(`【共读】《${active.title}》\n我当前读到约 ${progress()}%。请只依据下面这段本地正文回应，不要编造后文：\n${active.text.slice(Math.max(0, Math.floor(active.text.length * progress() / 100) - 3000), Math.floor(active.text.length * progress() / 100) + 3000)}`)}>一起读这一段</button></div></header><div className="book-reader-react" ref={readerRef} onScroll={() => patchBook({ progress: progress() })}><pre>{active.text}</pre></div><form className="media-note-form" onSubmit={(event) => { event.preventDefault(); if (!annotation.trim()) return; patchBook({ annotations: [...active.annotations, { id: id("annotation"), content: annotation.trim(), progress: progress() }] }); setAnnotation(""); }}><input value={annotation} onChange={(event) => setAnnotation(event.target.value)} placeholder="在当前进度添加批注" /><button>保存批注</button></form><div className="media-notes">{active.bookmarks.map((item) => <button type="button" key={item.id} onClick={() => { const node = readerRef.current; if (node) node.scrollTop = (node.scrollHeight - node.clientHeight) * item.progress / 100; }}>书签 · {item.label}</button>)}{active.annotations.map((item) => <button type="button" key={item.id} onClick={() => { const node = readerRef.current; if (node) node.scrollTop = (node.scrollHeight - node.clientHeight) * item.progress / 100; }}>{item.progress}% · {item.content}</button>)}</div></> : <p className="space-empty">选择一本本地书开始共读。</p>}</div></section>;
-}
-
 function parseSrt(value: string) {
   return value.replace(/\r/g, "").split(/\n\n+/).map((block) => {
     const lines = block.split("\n"); const timing = lines.find((line) => line.includes("-->")); if (!timing) return null;

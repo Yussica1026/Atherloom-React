@@ -2,6 +2,9 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./app/App";
 import { startLaunchScreen } from "./app/launchScreen";
+import { installDiagnostics } from "./features/diagnostics/store";
+
+installDiagnostics();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

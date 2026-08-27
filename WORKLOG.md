@@ -1,5 +1,16 @@
 # Atherloom React 工作日志
 
+## 2026-08-27 · v0.2.6 Cove Book Forge 本地移植与后台日志（待发布）
+
+- “一起读书”已从旧版整本文本 `localStorage` 阅读器替换为独立 `src/features/books/`：PDF / EPUB / TXT / Markdown 解析后按 Persona 写入 IndexedDB，旧书首次打开时幂等迁移；章节正文、阅读进度、书签与笔记均留在本机。
+- EPUB 按 OPF spine 顺序读取，PDF 使用现有随包 PDF.js 文字层并按物理页分组；空文字层明确提示先做 OCR。文件类型、源文件和章节内容分别使用 SHA-256 指纹。
+- 单章分析使用固定 JSON 契约、运行时归一化和最多一次格式修复；分析指纹纳入书名、作者、正文、笔记、用户可见的分析要求与 schema/prompt 版本，同输入直接命中缓存。
+- 整书炼制在启动前显示缓存章节和预计模型调用数；任务、当前章节、失败章节与 checkpoint 持久化，支持章节边界暂停、继续、取消、应用中断恢复和失败重试。
+- Android Standalone 通过原生 Provider bridge 做不写聊天的模型调用；FastAPI 模式使用隐藏临时会话并在 `finally` 删除或进入清理队列。两种模式都复用当前 Persona 与所选 Provider，不创建书籍专用人格。
+- 分析可导出脱正文 JSON，或导出含 `SKILL.md`、按章 references、manifest 与 SHA-256 checksums 的 Agent Skill ZIP。Cove Book Forge MIT notice 已加入随包 licenses 与根 NOTICE。
+- 新增“设置 → 后台日志”，本机环形保存最近 300 条页面异常、未处理异步错误、接口失败、书籍导入/分析与任务记录；支持级别筛选、搜索、复制、JSON 导出和用户主动清空。
+- 验证：`npm run typecheck`、production build 通过；书籍引擎 `13/13`；真实 Playwright 链覆盖两章 Markdown 导入、笔记、同 Persona 分析、缓存估算、整书完成、Skill 导出、390×844 布局与后台日志，控制台和页面错误为 0。准备作为 `v0.2.6` / versionCode 13 进入固定签名发布门禁。
+
 ## 2026-08-25 · v0.2.5 Android Standalone 休闲游戏（已发布）
 
 > 修正 v0.2.4 只有 FastAPI Casual Games、Android 本机模式不可用的问题。本轮完成可见入口与完整本地链路；不再把“代码进入 APK”当成手机可用。

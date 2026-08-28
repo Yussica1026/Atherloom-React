@@ -1,12 +1,13 @@
 # Atherloom React 工作日志
 
-## 2026-08-28 · v0.2.7 同 Persona 21 点（发布中）
+## 2026-08-28 · v0.2.7 同 Persona 21 点（已发布）
 
 - Casual Games 新增第五款双人 21 点。聊天中的当前 Persona 可通过 `open_game({ game_id: "blackjack" })` 开局，侧栏 GameHub 也可直接进入；不创建游戏专用 Persona 或 Provider。
 - Android Standalone 与 FastAPI 共用公开状态契约；模型每回合只提交 `hit / stand`，洗牌、持久牌堆、A 的 1/11 计分、爆牌、自动停牌、胜负与重试幂等全部由规则引擎负责。
 - 完整牌堆只存在于私有状态，不进入公开 Session、Persona 上下文、赛果或长期记忆；记忆仍默认询问，只保存双方最终点数与结果摘要并标记为真实互动。
 - 手机 390×844 真页面已跑通聊天唤起、要牌、停牌、结算、原聊天赛后回复和原 Persona 记忆；控制台、页面和 HTTP 错误均为 0。
-- 发布前验证：React production build 通过；Standalone runtime 通过；FastAPI Casual Games `39/39`；React、Android、导入、LongWorld、回归与发布契约全部通过。目标版本为 `v0.2.7` / versionCode 14。
+- 发布验证：React production build 通过；Standalone runtime 通过；FastAPI Casual Games `39/39`；React、Android、导入、LongWorld、回归与发布契约全部通过。React 提交 `d014246` 与 FastAPI 提交 `3e061f8` 已推送。
+- 分支固定签名构建 `33152517265` 与标签发布构建 `33152787953` 均成功。公开 APK 为 `11,968,379` 字节，SHA-256 为 `0f853d28b0b073be898e6726c83043bfa4d16ff4d8ec2226ed0777dbe912e2d8`，versionCode `14`，versionName `0.2.7-react-release`。Release：<https://github.com/Yussica1026/Atherloom-React/releases/tag/v0.2.7>；APK 直链：<https://github.com/Yussica1026/Atherloom-React/releases/download/v0.2.7/Atherloom-React-Android-release.apk>。
 
 ## 2026-08-27 · v0.2.6 Cove Book Forge 本地移植与后台日志（已发布）
 

@@ -33,6 +33,7 @@ function gameMark(gameId: CasualGameId) {
   if (gameId === "tic_tac_toe") return <span className="cg-hub-board" aria-hidden="true"><i>×</i><i /><i>○</i><i /><i>○</i><i /><i>×</i><i /><i /></span>;
   if (gameId === "rock_paper_scissors") return <span className="cg-hub-hands" aria-hidden="true"><i>石</i><i>剪</i><i>布</i></span>;
   if (gameId === "bulls_and_cows") return <span className="cg-hub-digits" aria-hidden="true"><i>1</i><i>8</i><i>3</i><i>0</i><b>1A · 2B</b></span>;
+  if (gameId === "blackjack") return <span className="cg-hub-blackjack" aria-hidden="true"><i>A<small>♠</small></i><i>10<small>♥</small></i><b>21</b></span>;
   return <span className="cg-hub-questions-mark" aria-hidden="true"><strong>20</strong><i>?</i><small>YES / NO</small></span>;
 }
 
@@ -135,7 +136,7 @@ export function GameHub({
 
       <main className="cg-hub-main">
         <div className="cg-hub-intro">
-          <p>也可以直接在聊天里说“陪我玩井字棋”“来猜数字”或“玩二十问”。</p>
+          <p>也可以直接在聊天里说“陪我玩井字棋”“来猜数字”“玩二十问”或“来一局 21 点”。</p>
           <span>身份、模型和记忆都沿用当前 Persona</span>
         </div>
 

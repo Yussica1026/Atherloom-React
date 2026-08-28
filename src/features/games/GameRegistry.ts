@@ -1,10 +1,12 @@
 import { createElement, type ReactNode } from "react";
+import { BlackjackGame } from "./games/blackjack/BlackjackGame";
 import { BullsAndCowsGame } from "./games/bulls-and-cows/BullsAndCowsGame";
 import { RockPaperScissorsGame } from "./games/rock-paper-scissors/RockPaperScissorsGame";
 import { TicTacToeGame } from "./games/tic-tac-toe/TicTacToeGame";
 import { TwentyQuestionsGame } from "./games/twenty-questions/TwentyQuestionsGame";
 import type {
   BullsAndCowsState,
+  BlackjackState,
   CasualGameAction,
   CasualGameActor,
   CasualGameId,
@@ -98,6 +100,22 @@ const registrations: Partial<Record<CasualGameId, GameRegistration>> = {
       onVerdict: (verdict) => props.onAction({ verdict }),
     }),
   },
+  blackjack: {
+    id: "blackjack",
+    label: "21 点",
+    eyebrow: "HIT · STAND · TWENTY-ONE",
+    description: "你和 Persona 轮流要牌或停牌；A 可作 1 或 11，谁更接近 21 点谁赢。",
+    resumeMark: "A♠ · 21",
+    rulesVersion: 1,
+    render: (props) => createElement(BlackjackGame, {
+      state: props.state as BlackjackState,
+      currentActor: props.currentActor,
+      personaName: props.personaName,
+      busy: props.busy,
+      pendingUserAction: props.pendingUserAction,
+      onDecision: (decision) => props.onAction({ decision }),
+    }),
+  },
 };
 
 export function getGameRegistration(gameId: CasualGameId) {
@@ -110,5 +128,6 @@ export function listGameRegistrations() {
     registrations.rock_paper_scissors,
     registrations.bulls_and_cows,
     registrations.twenty_questions,
+    registrations.blackjack,
   ].filter((item): item is GameRegistration => Boolean(item));
 }

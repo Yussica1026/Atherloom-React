@@ -24,6 +24,7 @@ class ReactCasualGamesContracts(unittest.TestCase):
             "src/features/games/hooks/useGameSession.ts",
             "src/features/games/games/tic-tac-toe/TicTacToeGame.tsx",
             "src/features/games/games/rock-paper-scissors/RockPaperScissorsGame.tsx",
+            "src/features/games/games/blackjack/BlackjackGame.tsx",
         )
         for relative in expected:
             self.assertTrue((ROOT / relative).is_file(), relative)
@@ -33,7 +34,13 @@ class ReactCasualGamesContracts(unittest.TestCase):
         self.assertIn('name: "atherloom_open_game"', standalone)
         self.assertIn('"tic_tac_toe"', engine)
         self.assertIn('"rock_paper_scissors"', engine)
+        self.assertIn('"blackjack"', engine)
         self.assertIn("user_choice_committed", engine)
+
+        registry = source("src/features/games/GameRegistry.ts")
+        self.assertIn('id: "blackjack"', registry)
+        self.assertIn("BlackjackGame", registry)
+        self.assertIn("registrations.blackjack", registry)
 
     def test_visible_hub_starts_and_reopens_same_persona_games(self) -> None:
         hub = source("src/features/games/GameHub.tsx")
@@ -89,6 +96,23 @@ class ReactCasualGamesContracts(unittest.TestCase):
         self.assertNotRegex(game, r"Math\.random|BEATS|winner\s*=|outcome\s*=")
         self.assertIn("结果由规则引擎确认", game)
 
+    def test_blackjack_ui_renders_server_state_without_deciding_result(self) -> None:
+        registry = source("src/features/games/GameRegistry.ts")
+        game = source("src/features/games/games/blackjack/BlackjackGame.tsx")
+        self.assertIn('id: "blackjack"', registry)
+        self.assertIn("BlackjackGame", registry)
+        self.assertIn('onDecision: (decision) => props.onAction({ decision })', registry)
+        self.assertIn("state.user_total", game)
+        self.assertIn("state.persona_total", game)
+        self.assertIn('onDecision("hit")', game)
+        self.assertIn('onDecision("stand")', game)
+        self.assertIn("disabled={busy || state.user_total >= 21}", game)
+        self.assertIn("胜负全部由规则引擎判定", game)
+        self.assertNotRegex(
+            game,
+            r"Math\.random|blackjackTotal|winner\s*=|outcome\s*=|result\s*=|\.deck\b",
+        )
+
     def test_game_visuals_only_use_existing_theme_and_font_tokens(self) -> None:
         styles = source("src/features/games/games.css")
         self.assertIsNone(re.search(r"#[0-9a-fA-F]{3,8}\b|rgba?\(", styles))
@@ -96,6 +120,22 @@ class ReactCasualGamesContracts(unittest.TestCase):
             self.assertIn(token, styles)
         self.assertIn("@media (prefers-reduced-motion: reduce)", styles)
         self.assertIn("height: 100dvh", styles)
+        self.assertIn(".cg-hub-blackjack", styles)
+        blackjack_styles = styles[
+            styles.index(".cg-blackjack {") : styles.index(".cg-engine-note")
+        ]
+        for token in (
+            "var(--bg)",
+            "var(--surface)",
+            "var(--text)",
+            "var(--muted)",
+            "var(--accent)",
+            "var(--border)",
+            "var(--danger)",
+            "var(--font-ui)",
+            "var(--serif)",
+        ):
+            self.assertIn(token, blackjack_styles)
         overlay = source("src/features/games/GameOverlay.tsx")
         self.assertIn('setAttribute("inert", "")', overlay)
         self.assertIn('event.key === "Escape"', overlay)

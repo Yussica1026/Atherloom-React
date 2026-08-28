@@ -119,6 +119,6 @@ export function installDiagnostics() {
   });
   recordDiagnostic("info", "runtime", "应用日志已启动", {
     mode: window.AtherloomNative ? "android" : "browser",
-    version: "0.2.6",
+    version: "0.2.7",
   });
 }

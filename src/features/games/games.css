@@ -52,6 +52,7 @@
 
 .cg-hub-games { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .cg-hub-games article { position: relative; min-height: 315px; display: grid; grid-template-rows: 120px 1fr auto; gap: 15px; overflow: hidden; padding: 22px; border: 1px solid var(--border); border-radius: 20px; background: var(--bg); }
+.cg-hub-games article.is-blackjack { grid-column: 1 / -1; }
 .cg-hub-games article > div small { color: var(--accent-dark); font: 700 9px/1.2 var(--font-ui); letter-spacing: .14em; }
 .cg-hub-games h3 { margin: 5px 0 7px; font: 400 30px/1.05 var(--serif); }
 .cg-hub-games p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
@@ -75,6 +76,11 @@
 .cg-hub-questions-mark strong { color: color-mix(in srgb, var(--accent) 74%, var(--text)); font: 400 82px/.8 var(--serif); letter-spacing: -.08em; }
 .cg-hub-questions-mark i { position: absolute; top: 5px; right: 4px; width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid var(--accent); border-radius: 50%; background: var(--surface); color: var(--accent-dark); font: 400 24px/1 var(--serif); font-style: normal; }
 .cg-hub-questions-mark small { margin-top: 9px; color: var(--muted); font: 700 8px/1 var(--font-ui); letter-spacing: .15em; }
+.cg-hub-blackjack { position: relative; height: 120px; display: flex; align-items: center; justify-content: flex-end; padding-right: 20px; }
+.cg-hub-blackjack i { width: 70px; height: 96px; display: grid; place-items: center; align-content: center; border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border)); border-radius: 10px; background: var(--surface); color: var(--text); font: 400 29px/1 var(--serif); font-style: normal; box-shadow: 0 8px 18px color-mix(in srgb, var(--text) 7%, transparent); transform: rotate(-7deg); }
+.cg-hub-blackjack i:nth-child(2) { margin-left: -22px; color: var(--danger); transform: translateY(7px) rotate(8deg); }
+.cg-hub-blackjack i small { margin-top: 4px; font-size: 17px; }
+.cg-hub-blackjack b { position: absolute; right: 0; bottom: 2px; width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--accent); border-radius: 50%; background: var(--bg); color: var(--accent-dark); font: 700 11px var(--font-ui); }
 
 .cg-hub-secret-setup { position: absolute; z-index: 3; inset: 10px; display: grid; grid-template-rows: auto auto auto auto 1fr; align-content: start; gap: 10px; padding: 18px; border: 1px solid color-mix(in srgb, var(--accent) 52%, var(--border)); border-radius: 15px; background: color-mix(in srgb, var(--surface) 97%, var(--accent) 2%); box-shadow: 0 16px 40px color-mix(in srgb, var(--text) 13%, transparent); }
 .cg-hub-secret-setup > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -374,6 +380,40 @@
 .cg-questions-log li > strong.is-waiting { color: var(--muted); font-weight: 500; }
 .cg-questions-empty { min-height: 90px; display: grid; place-items: center; margin: 0; border: 1px dashed var(--border); border-radius: 12px; color: var(--muted); font-size: 10px; }
 
+.cg-blackjack { width: min(570px, 100%); display: grid; gap: 17px; margin: 0 auto; }
+.cg-blackjack-table { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 76px minmax(0, 1fr); align-items: stretch; gap: 10px; }
+.cg-blackjack-hand { min-width: 0; display: grid; grid-template-rows: auto minmax(118px, 1fr) auto; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 17px; background: var(--surface); transition: border-color .18s ease, background .18s ease; }
+.cg-blackjack-hand.is-active { border-color: var(--accent); background: color-mix(in srgb, var(--surface) 94%, var(--accent) 4%); box-shadow: inset 0 3px 0 color-mix(in srgb, var(--accent) 66%, transparent); }
+.cg-blackjack-hand > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cg-blackjack-hand > header span { color: var(--accent-dark); font: 700 8px/1 var(--font-ui); letter-spacing: .13em; }
+.cg-blackjack-hand > header h3 { max-width: 130px; overflow: hidden; margin: 4px 0 0; color: var(--text); font: 400 18px/1 var(--serif); text-overflow: ellipsis; white-space: nowrap; }
+.cg-blackjack-hand > header > strong { min-width: 39px; color: var(--text); font: 400 34px/.9 var(--serif); text-align: right; }
+.cg-blackjack-hand.is-persona > header > strong { color: var(--accent-dark); }
+.cg-blackjack-hand > footer { min-height: 14px; color: var(--muted); font: 700 8px/1.2 var(--font-ui); letter-spacing: .08em; text-align: right; }
+.cg-blackjack-cards { min-width: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 5px 10px 8px; }
+.cg-blackjack-card { width: 62px; height: 90px; flex: 0 0 62px; display: grid; place-content: center; justify-items: center; margin-left: -29px; border: 1px solid color-mix(in srgb, var(--text) 26%, var(--border)); border-radius: 9px; background: var(--bg); color: var(--text); box-shadow: 0 7px 16px color-mix(in srgb, var(--text) 9%, transparent); transform: rotate(-3deg); }
+.cg-blackjack-card:first-child { margin-left: 0; }
+.cg-blackjack-card:nth-child(even) { transform: translateY(4px) rotate(3deg); }
+.cg-blackjack-card:nth-child(3n) { transform: translateY(-2px) rotate(1deg); }
+.cg-blackjack-card.is-warm { color: var(--danger); }
+.cg-blackjack-card b { font: 400 23px/1 var(--serif); }
+.cg-blackjack-card i { margin-top: 7px; font: 400 21px/1 var(--serif); font-style: normal; }
+.cg-blackjack-knot { position: relative; display: grid; place-content: center; justify-items: center; gap: 6px; color: var(--muted); }
+.cg-blackjack-knot::before { content: ""; position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: var(--border); }
+.cg-blackjack-knot span { z-index: 1; width: 52px; height: 52px; display: grid; place-items: center; border: 1px solid var(--accent); border-radius: 50%; background: var(--bg); color: var(--accent-dark); font: 400 24px/1 var(--serif); }
+.cg-blackjack-knot small { z-index: 1; padding: 3px 5px; background: var(--bg); font: 700 8px var(--font-ui); white-space: nowrap; }
+.cg-blackjack-status { min-height: 27px; margin: 0; color: var(--text); font: 400 19px/1.4 var(--serif); text-align: center; }
+.cg-blackjack-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.cg-blackjack-actions button { min-height: 72px; display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; align-items: center; gap: 2px 10px; border: 1px solid var(--border); border-radius: 13px; padding: 11px 15px; background: var(--surface); color: var(--text); text-align: left; transition: border-color .16s ease, background .16s ease, transform .16s ease; }
+.cg-blackjack-actions button:not(:disabled):hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); transform: translateY(-1px); }
+.cg-blackjack-actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cg-blackjack-actions button:disabled { cursor: wait; opacity: .6; }
+.cg-blackjack-actions button.is-pending { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+.cg-blackjack-actions span { grid-row: 1 / 3; color: var(--accent-dark); font: 700 9px var(--font-ui); letter-spacing: .1em; }
+.cg-blackjack-actions strong { font-size: 13px; }
+.cg-blackjack-actions small { color: var(--muted); font-size: 9px; }
+.cg-blackjack-rule { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.55; text-align: center; }
+
 .cg-engine-note { margin: 15px 0; padding: 13px 15px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
 .cg-engine-note.is-error { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
 .cg-engine-note strong { font-size: 13px; }
@@ -426,6 +466,7 @@
   .cg-hub-games article > .cg-hub-board,
   .cg-hub-games article > .cg-hub-hands,
   .cg-hub-games article > .cg-hub-digits,
+  .cg-hub-games article > .cg-hub-blackjack,
   .cg-hub-games article > .cg-hub-questions-mark { grid-column: 2; grid-row: 1; width: 104px; height: 104px; align-self: start; }
   .cg-hub-hands i { width: 55px; height: 74px; font-size: 23px; }
   .cg-hub-digits { gap: 3px; }
@@ -442,7 +483,12 @@
   .cg-rps-stage,
   .cg-rps-choices { width: min(92vw, 500px); }
   .cg-bac,
-  .cg-questions { width: min(92vw, 560px); }
+  .cg-questions,
+  .cg-blackjack { width: min(92vw, 570px); }
+  .cg-blackjack-table { grid-template-columns: minmax(0, 1fr); }
+  .cg-blackjack-knot { min-height: 54px; }
+  .cg-blackjack-knot::before { top: 50%; }
+  .cg-blackjack-hand { grid-template-rows: auto minmax(104px, 1fr) auto; }
   .cg-turn-status { margin-top: 17px; }
   .cg-room-footer { padding-bottom: max(13px, env(safe-area-inset-bottom)); }
   .cg-abandon-confirm { flex-wrap: wrap; }
@@ -473,6 +519,7 @@
   .cg-questions-actions i { display: none; }
   .cg-questions-log li { grid-template-columns: 24px minmax(0, 1fr); }
   .cg-questions-log li > strong { grid-column: 2; justify-self: start; }
+  .cg-blackjack-actions { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -483,5 +530,7 @@
   .cg-cell,
   .cg-rps-choices button,
   .cg-questions-actions button,
+  .cg-blackjack-actions button,
+  .cg-blackjack-hand,
   .cg-questions-progress > span { transition: none; }
 }

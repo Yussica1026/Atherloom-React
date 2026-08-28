@@ -5,6 +5,9 @@ import type {
   CasualGameResult,
   CasualGameResultRecord,
   CasualGameSession,
+  BlackjackCard,
+  BlackjackDecision,
+  BlackjackState,
   BullsAndCowsState,
   RegisteredCasualGameState,
   RockPaperScissorsChoice,
@@ -19,6 +22,7 @@ const supportedGames = new Set<CasualGameId>([
   "rock_paper_scissors",
   "bulls_and_cows",
   "twenty_questions",
+  "blackjack",
 ]);
 const rpsChoices = new Set<RockPaperScissorsChoice>(["rock", "paper", "scissors"]);
 const winningLines = [
@@ -32,7 +36,11 @@ interface PrivateBullsAndCowsState extends BullsAndCowsState {
   persona_secret: string;
 }
 
-type StoredCasualGameState = RegisteredCasualGameState | PrivateBullsAndCowsState;
+interface PrivateBlackjackState extends BlackjackState {
+  deck: BlackjackCard[];
+}
+
+type StoredCasualGameState = RegisteredCasualGameState | PrivateBullsAndCowsState | PrivateBlackjackState;
 
 interface StoredSession extends Omit<CasualGameSession<RegisteredCasualGameState>, "state" | "current_actor"> {
   state: StoredCasualGameState;
@@ -150,7 +158,7 @@ function exactKeys(value: Record<string, unknown>, allowed: string[], label: str
 
 function supportedGameId(value: unknown): CasualGameId {
   const gameId = String(value || "") as CasualGameId;
-  if (!supportedGames.has(gameId)) throw new Error("当前只开放井字棋、猜拳、猜数字和二十问");
+  if (!supportedGames.has(gameId)) throw new Error("当前只开放井字棋、猜拳、猜数字、二十问和 21 点");
   return gameId;
 }
 
@@ -164,6 +172,11 @@ function publicState(session: StoredSession): RegisteredCasualGameState {
     delete state.user_secret;
     delete state.persona_secret;
     return state as BullsAndCowsState;
+  }
+  if (session.game_id === "blackjack") {
+    const state = structuredCopy(session.state) as Partial<PrivateBlackjackState>;
+    delete state.deck;
+    return state as BlackjackState;
   }
   if (session.game_id === "rock_paper_scissors") {
     const state = session.state as RockPaperScissorsState;
@@ -235,6 +248,46 @@ function randomDistinctDigits() {
   return digits.slice(0, 4).join("");
 }
 
+const blackjackRanks: BlackjackCard["rank"][] = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+const blackjackSuits: BlackjackCard["suit"][] = ["clubs", "diamonds", "hearts", "spades"];
+
+function shuffledBlackjackDeck() {
+  const deck = blackjackSuits.flatMap((suit) => blackjackRanks.map((rank) => ({ rank, suit } satisfies BlackjackCard)));
+  for (let index = deck.length - 1; index > 0; index -= 1) {
+    const random = new Uint32Array(1);
+    crypto.getRandomValues(random);
+    const swapIndex = random[0] % (index + 1);
+    [deck[index], deck[swapIndex]] = [deck[swapIndex], deck[index]];
+  }
+  return deck;
+}
+
+function blackjackTotal(hand: BlackjackCard[]) {
+  let total = 0;
+  let aces = 0;
+  for (const card of hand) {
+    if (card.rank === "A") {
+      total += 11;
+      aces += 1;
+    } else if (card.rank === "K" || card.rank === "Q" || card.rank === "J") {
+      total += 10;
+    } else {
+      total += Number(card.rank);
+    }
+  }
+  while (total > 21 && aces > 0) {
+    total -= 10;
+    aces -= 1;
+  }
+  return total;
+}
+
+function drawBlackjackCard(deck: BlackjackCard[]) {
+  const card = deck.pop();
+  if (!card) throw new Error("牌堆已经用完，无法继续要牌");
+  return card;
+}
+
 function createInitialState(gameId: CasualGameId, optionsValue: unknown): StoredCasualGameState {
   const options = optionsValue === undefined ? {} : objectOf(optionsValue, "options");
   if (gameId === "tic_tac_toe") {
@@ -258,6 +311,26 @@ function createInitialState(gameId: CasualGameId, optionsValue: unknown): Stored
       user_secret: userSecret,
       persona_secret: randomDistinctDigits(),
     } satisfies PrivateBullsAndCowsState;
+  }
+  if (gameId === "blackjack") {
+    exactKeys(options, [], "options");
+    const deck = shuffledBlackjackDeck();
+    const userHand = [drawBlackjackCard(deck)];
+    const personaHand = [drawBlackjackCard(deck)];
+    userHand.push(drawBlackjackCard(deck));
+    personaHand.push(drawBlackjackCard(deck));
+    return {
+      status: "active",
+      turn: "user",
+      user_hand: userHand,
+      persona_hand: personaHand,
+      user_total: blackjackTotal(userHand),
+      persona_total: blackjackTotal(personaHand),
+      user_stood: false,
+      persona_stood: false,
+      deck_remaining: deck.length,
+      deck,
+    } satisfies PrivateBlackjackState;
   }
   exactKeys(options, [], "options");
   return {
@@ -434,6 +507,86 @@ function applyAction(session: StoredSession, actor: "user" | "persona", actionVa
       round: actor === "persona" ? state.round + 1 : state.round,
       history,
     };
+    return { action, events, result: null };
+  }
+
+  if (session.game_id === "blackjack") {
+    exactKeys(action, ["decision"], "action");
+    const decision = action.decision as BlackjackDecision;
+    if (decision !== "hit" && decision !== "stand") throw new Error("21 点只能选择 hit 或 stand");
+    const state = structuredCopy(session.state as PrivateBlackjackState);
+    if (actor === "user" ? state.user_stood : state.persona_stood) throw new Error("已经停牌的参与者不能再次行动");
+    const totalBeforeAction = actor === "user" ? state.user_total : state.persona_total;
+    if (decision === "hit" && totalBeforeAction >= 21) throw new Error("达到 21 点后只能停牌");
+
+    const events: Array<Record<string, unknown>> = [];
+    if (decision === "hit") {
+      const card = drawBlackjackCard(state.deck);
+      const hand = actor === "user" ? state.user_hand : state.persona_hand;
+      hand.push(card);
+      events.push({ type: "card_drawn", actor, card, deck_remaining: state.deck.length });
+    } else {
+      if (actor === "user") state.user_stood = true;
+      else state.persona_stood = true;
+      events.push({ type: "hand_stood", actor });
+    }
+
+    state.user_total = blackjackTotal(state.user_hand);
+    state.persona_total = blackjackTotal(state.persona_hand);
+    state.deck_remaining = state.deck.length;
+    const actorTotal = actor === "user" ? state.user_total : state.persona_total;
+    if (decision === "hit" && actorTotal === 21) {
+      if (actor === "user") state.user_stood = true;
+      else state.persona_stood = true;
+      events.push({ type: "automatic_stand", actor, total: 21 });
+    }
+
+    const finish = (outcome: "user_win" | "persona_win" | "draw", reason: string) => {
+      const winner = outcome === "draw" ? "draw" : outcome === "user_win" ? "user" : "persona";
+      state.status = "finished";
+      state.turn = null;
+      const notable = [
+        `finish_reason:${reason}`,
+        `user_total:${state.user_total}`,
+        `persona_total:${state.persona_total}`,
+        `user_cards:${state.user_hand.length}`,
+        `persona_cards:${state.persona_hand.length}`,
+      ];
+      if (state.user_total === 21 && state.user_hand.length === 2) notable.push("natural_blackjack:user");
+      if (state.persona_total === 21 && state.persona_hand.length === 2) notable.push("natural_blackjack:persona");
+      events.push({ type: "game_finished", outcome, winner, reason });
+      return {
+        action,
+        events,
+        result: resultFrom(
+          session,
+          outcome,
+          { user: state.user_total, persona: state.persona_total },
+          notable,
+          now(),
+        ),
+      };
+    };
+
+    if (actorTotal > 21) {
+      session.state = state;
+      return finish(actor === "user" ? "persona_win" : "user_win", `${actor}_bust`);
+    }
+    if (state.user_stood && state.persona_stood) {
+      const outcome = state.user_total === state.persona_total
+        ? "draw"
+        : state.user_total > state.persona_total
+          ? "user_win"
+          : "persona_win";
+      session.state = state;
+      return finish(outcome, "both_stood");
+    }
+
+    const other = actor === "user" ? "persona" : "user";
+    const otherStood = other === "user" ? state.user_stood : state.persona_stood;
+    const actorStood = actor === "user" ? state.user_stood : state.persona_stood;
+    state.turn = !otherStood ? other : !actorStood ? actor : null;
+    session.state = state;
     return { action, events, result: null };
   }
 
@@ -621,6 +774,18 @@ async function personaTurn(sessionId: string, bodyValue: unknown, runtime: Stand
       ? { type: "object", properties: { choice: { type: "string", enum: ["rock", "paper", "scissors"] } }, required: ["choice"], additionalProperties: false }
       : session.game_id === "bulls_and_cows"
         ? { type: "object", properties: { guess: { type: "string", pattern: "^(?!.*([0-9]).*\\1)[0-9]{4}$" } }, required: ["guess"], additionalProperties: false }
+        : session.game_id === "blackjack"
+          ? {
+            type: "object",
+            properties: {
+              decision: {
+                type: "string",
+                enum: (visible.state as BlackjackState).persona_total >= 21 ? ["stand"] : ["hit", "stand"],
+              },
+            },
+            required: ["decision"],
+            additionalProperties: false,
+          }
         : {
           type: "object",
           properties: {
@@ -662,6 +827,13 @@ function gameMemoryText(session: StoredSession, result: CasualGameResult) {
       content: `我和用户完成了一局二十问，共问了${state.question_count}次，结果是${outcome}。`,
     };
   }
+  if (session.game_id === "blackjack") {
+    const state = session.state as PrivateBlackjackState;
+    return {
+      title: "与用户完成一局 21 点",
+      content: `我和用户完成了一局 21 点；用户最终 ${state.user_total} 点，我最终 ${state.persona_total} 点，结果是${outcome}。`,
+    };
+  }
   const names: Record<string, string> = { rock: "石头", paper: "布", scissors: "剪刀" };
   const state = session.state as RockPaperScissorsState;
   return {
@@ -697,6 +869,7 @@ export async function requestStandaloneCasualGameJson<T>(
       { id: "rock_paper_scissors", label: "猜拳", rules_version: 1 },
       { id: "bulls_and_cows", label: "猜数字", rules_version: 1 },
       { id: "twenty_questions", label: "二十问", rules_version: 1 },
+      { id: "blackjack", label: "21 点", rules_version: 1 },
     ] } as T;
   }
   if (path.startsWith("/api/casual-games/sessions?") && method === "GET") {

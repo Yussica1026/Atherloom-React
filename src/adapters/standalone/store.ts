@@ -1036,13 +1036,15 @@ const diaryBoardIntent = /日记|留言板|便利贴|便笺|留给你的话|给�
 const memoIntent = /备忘录|备忘一下|记个备忘|生活簿|待办|任务清单|备忘.{0,12}(?:风格|颜色|色调|主题|版式)/u;
 const wakeTaskIntent = /自动唤醒|唤醒任务|定时(?:提醒|联系|找我|说话|消息|留言|发(?:条)?消息)|(?:过|每隔|每天|稍后).{0,16}(?:分钟|小时|天)?.{0,16}(?:提醒|联系|找我|说话|发(?:条)?消息|留(?:条)?言)|(?:分钟|小时|天)后.{0,16}(?:提醒|联系|找我|说话|发(?:条)?消息|留(?:条)?言)/u;
 const casualGameIntent = /(?:陪我|和我|我们|来|一起)?(?:玩|下|开).{0,8}(?:井字棋|猜拳|石头剪刀布|剪刀石头布|猜数字|几A几B|二十问|20问)|(?:井字棋|猜拳|石头剪刀布|剪刀石头布|猜数字|几A几B|二十问|20问).{0,8}(?:玩|来一局|开始)/u;
+const blackjackIntent = /(?:21\s*点|二十一点|黑杰克|blackjack)/iu;
 const standaloneToolIntent = new RegExp([
   diaryBoardIntent.source,
   memoIntent.source,
   wakeTaskIntent.source,
   casualGameIntent.source,
+  blackjackIntent.source,
   subagentIntentPattern.source,
-].join("|"), "u");
+].join("|"), "iu");
 
 function configuredToolPolicy(settings: AppSettings, key: string) {
   const permissions = settings.tool_permissions && typeof settings.tool_permissions === "object"
@@ -1054,16 +1056,16 @@ function configuredToolPolicy(settings: AppSettings, key: string) {
 
 function writingToolDefinitions(settings: AppSettings, content: string, persona?: Persona): StandaloneToolDefinition[] {
   const tools: StandaloneToolDefinition[] = [];
-  if (casualGameIntent.test(content)) tools.push({
+  if (casualGameIntent.test(content) || blackjackIntent.test(content)) tools.push({
     name: "atherloom_open_game",
-    description: "按用户当前请求，为当前聊天和当前 Persona 打开一局休闲游戏。game_id 映射：tic_tac_toe 是井字棋；rock_paper_scissors 是猜拳；bulls_and_cows 是猜数字；twenty_questions 是二十问。",
+    description: "按用户当前请求，为当前聊天和当前 Persona 打开一局休闲游戏。game_id 映射：tic_tac_toe 是井字棋；rock_paper_scissors 是猜拳；bulls_and_cows 是猜数字；twenty_questions 是二十问；blackjack 是 21 点。",
     input_schema: {
       type: "object",
       properties: {
         game_id: {
           type: "string",
-          enum: ["tic_tac_toe", "rock_paper_scissors", "bulls_and_cows", "twenty_questions"],
-          description: "井字棋使用 tic_tac_toe；猜拳使用 rock_paper_scissors；猜数字使用 bulls_and_cows；二十问使用 twenty_questions。",
+          enum: ["tic_tac_toe", "rock_paper_scissors", "bulls_and_cows", "twenty_questions", "blackjack"],
+          description: "井字棋使用 tic_tac_toe；猜拳使用 rock_paper_scissors；猜数字使用 bulls_and_cows；二十问使用 twenty_questions；21 点使用 blackjack。",
         },
       },
       required: ["game_id"],
@@ -1194,14 +1196,15 @@ export function executeStandaloneWritingTool(context: StandaloneChatContext, cal
       const extra = Object.keys(args).filter((key) => key !== "game_id");
       if (extra.length) throw new Error(`打开游戏包含不支持的参数：${extra.join("、")}`);
       const gameId = String(args.game_id || "");
-      if (!["tic_tac_toe", "rock_paper_scissors", "bulls_and_cows", "twenty_questions"].includes(gameId)) {
-        throw new Error("当前只开放井字棋、猜拳、猜数字和二十问");
+      if (!["tic_tac_toe", "rock_paper_scissors", "bulls_and_cows", "twenty_questions", "blackjack"].includes(gameId)) {
+        throw new Error("当前只开放井字棋、猜拳、猜数字、二十问和 21 点");
       }
       const gameLabels: Record<string, string> = {
         tic_tac_toe: "井字棋",
         rock_paper_scissors: "猜拳",
         bulls_and_cows: "猜数字",
         twenty_questions: "二十问",
+        blackjack: "21 点",
       };
       const runtime = standaloneCasualGameRuntime();
       if (gameId === "bulls_and_cows") {

@@ -60,9 +60,9 @@ npm run dev
 
 Android 客户端使用独立包名 `app.atherloom.react`，不会覆盖旧版 Atherloom。APK 内置 React 页面，默认使用本机模式：API Key 通过 Android 加密存储保管，设置和聊天数据留在当前设备，模型请求通过原生桥直接发往所填线路。
 
-当前固定签名版：[`v0.2.6 免登录直接下载 APK`](https://github.com/Yussica1026/Atherloom-React/releases/download/v0.2.6/Atherloom-React-Android-release.apk)。
+当前固定签名版：[`v0.2.7 免登录直接下载 APK`](https://github.com/Yussica1026/Atherloom-React/releases/download/v0.2.7/Atherloom-React-Android-release.apk)。
 
-`v0.2.6` 在既有语音、MiniMax TTS、多字体、日记 / 留言板 / 梦库、自动唤醒和人格子代理基础上，加入 ChatGPT、Claude、Kelivo、AstrBot 外部对话导入，四款同 Persona 休闲游戏，以及本地书库、章节分析、整书断点任务、Agent Skill 导出和后台日志。
+`v0.2.7` 在 v0.2.6 的 ChatGPT、Claude、Kelivo、AstrBot 外部对话导入、四款同 Persona 游戏和本地 Cove Book Forge 基础上，新增同 Persona 双人 21 点：模型只选择要牌或停牌，程序负责私有牌堆、计分与胜负，赛果回到原聊天并可写入原 Persona 记忆。
 
 需要共用现有 FastAPI/SQLite 时，可进入“设置 → 后端连接”填写电脑或服务器地址，例如 `http://192.168.1.20:8876`；清空地址并保存即可切回本机模式。详细说明见 [Android 构建说明](android/README.md)。
 

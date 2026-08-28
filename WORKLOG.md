@@ -1,6 +1,14 @@
 # Atherloom React 工作日志
 
-## 2026-08-27 · v0.2.6 Cove Book Forge 本地移植与后台日志（待发布）
+## 2026-08-28 · v0.2.7 同 Persona 21 点（发布中）
+
+- Casual Games 新增第五款双人 21 点。聊天中的当前 Persona 可通过 `open_game({ game_id: "blackjack" })` 开局，侧栏 GameHub 也可直接进入；不创建游戏专用 Persona 或 Provider。
+- Android Standalone 与 FastAPI 共用公开状态契约；模型每回合只提交 `hit / stand`，洗牌、持久牌堆、A 的 1/11 计分、爆牌、自动停牌、胜负与重试幂等全部由规则引擎负责。
+- 完整牌堆只存在于私有状态，不进入公开 Session、Persona 上下文、赛果或长期记忆；记忆仍默认询问，只保存双方最终点数与结果摘要并标记为真实互动。
+- 手机 390×844 真页面已跑通聊天唤起、要牌、停牌、结算、原聊天赛后回复和原 Persona 记忆；控制台、页面和 HTTP 错误均为 0。
+- 发布前验证：React production build 通过；Standalone runtime 通过；FastAPI Casual Games `39/39`；React、Android、导入、LongWorld、回归与发布契约全部通过。目标版本为 `v0.2.7` / versionCode 14。
+
+## 2026-08-27 · v0.2.6 Cove Book Forge 本地移植与后台日志（已发布）
 
 - “一起读书”已从旧版整本文本 `localStorage` 阅读器替换为独立 `src/features/books/`：PDF / EPUB / TXT / Markdown 解析后按 Persona 写入 IndexedDB，旧书首次打开时幂等迁移；章节正文、阅读进度、书签与笔记均留在本机。
 - EPUB 按 OPF spine 顺序读取，PDF 使用现有随包 PDF.js 文字层并按物理页分组；空文字层明确提示先做 OCR。文件类型、源文件和章节内容分别使用 SHA-256 指纹。
@@ -9,7 +17,7 @@
 - Android Standalone 通过原生 Provider bridge 做不写聊天的模型调用；FastAPI 模式使用隐藏临时会话并在 `finally` 删除或进入清理队列。两种模式都复用当前 Persona 与所选 Provider，不创建书籍专用人格。
 - 分析可导出脱正文 JSON，或导出含 `SKILL.md`、按章 references、manifest 与 SHA-256 checksums 的 Agent Skill ZIP。Cove Book Forge MIT notice 已加入随包 licenses 与根 NOTICE。
 - 新增“设置 → 后台日志”，本机环形保存最近 300 条页面异常、未处理异步错误、接口失败、书籍导入/分析与任务记录；支持级别筛选、搜索、复制、JSON 导出和用户主动清空。
-- 验证：`npm run typecheck`、production build 通过；书籍引擎 `13/13`；真实 Playwright 链覆盖两章 Markdown 导入、笔记、同 Persona 分析、缓存估算、整书完成、Skill 导出、390×844 布局与后台日志，控制台和页面错误为 0。准备作为 `v0.2.6` / versionCode 13 进入固定签名发布门禁。
+- 验证：`npm run typecheck`、production build 通过；书籍引擎 `13/13`；真实 Playwright 链覆盖两章 Markdown 导入、笔记、同 Persona 分析、缓存估算、整书完成、Skill 导出、390×844 布局与后台日志，控制台和页面错误为 0。已作为 `v0.2.6` / versionCode 13 发布。
 
 ## 2026-08-25 · v0.2.5 Android Standalone 休闲游戏（已发布）
 

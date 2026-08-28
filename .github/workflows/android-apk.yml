@@ -82,8 +82,8 @@ jobs:
           grep -Fqi 'c31ec8be3956258e35b852545d43607ea87cbeefa805593633fa0e522033940a' android/apk-signature.txt
           "$AAPT" dump badging "$APK" | tee android/apk-badging.txt
           grep -Fq "package: name='app.atherloom.react'" android/apk-badging.txt
-          grep -Fq "versionCode='13'" android/apk-badging.txt
-          grep -Fq "versionName='0.2.6-react-release'" android/apk-badging.txt
+          grep -Fq "versionCode='14'" android/apk-badging.txt
+          grep -Fq "versionName='0.2.7-react-release'" android/apk-badging.txt
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             EXPECTED_TAG="v$(node -p 'require("./package.json").version')"
             test "$GITHUB_REF_NAME" = "$EXPECTED_TAG"
@@ -113,4 +113,4 @@ jobs:
             android/apk-signature.txt \
             android/apk-badging.txt \
             --title "Atherloom React $GITHUB_REF_NAME" \
-            --notes "Atherloom React Android 固定签名版。v0.2.6 包含 ChatGPT、Claude、Kelivo、AstrBot 外部对话导入，四款同 Persona 休闲游戏，以及本地 Cove Book Forge 书库、章节分析、整书断点任务、Agent Skill 导出和后台日志。独立包名 app.atherloom.react；已安装固定签名版的设备可直接覆盖升级并保留应用数据。"
+            --notes "Atherloom React Android 固定签名版。v0.2.7 新增第五款同 Persona 休闲游戏 21 点：侧栏或聊天均可开局，Android 本机模式由程序管理私有牌堆、要牌/停牌、计分与胜负，赛果回到原聊天并可写入原 Persona 记忆。继续包含 ChatGPT、Claude、Kelivo、AstrBot 外部对话导入及本地 Cove Book Forge。独立包名 app.atherloom.react；已安装固定签名版的设备可直接覆盖升级并保留应用数据。"

@@ -3,6 +3,7 @@ export const casualGameIds = [
   "rock_paper_scissors",
   "bulls_and_cows",
   "twenty_questions",
+  "blackjack",
 ] as const;
 
 export type CasualGameId = (typeof casualGameIds)[number];
@@ -111,18 +112,41 @@ export interface TwentyQuestionsState {
   transcript: TwentyQuestionsTranscriptEntry[];
 }
 
+export type BlackjackRank = "A" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "10" | "J" | "Q" | "K";
+export type BlackjackSuit = "spades" | "hearts" | "diamonds" | "clubs";
+export type BlackjackDecision = "hit" | "stand";
+
+export interface BlackjackCard {
+  rank: BlackjackRank;
+  suit: BlackjackSuit;
+}
+
+export interface BlackjackState {
+  status: "active" | "finished" | "abandoned";
+  turn: CasualGameActor | null;
+  user_hand: BlackjackCard[];
+  persona_hand: BlackjackCard[];
+  user_total: number;
+  persona_total: number;
+  user_stood: boolean;
+  persona_stood: boolean;
+  deck_remaining: number;
+}
+
 export type RegisteredCasualGameState =
   | TicTacToeState
   | RockPaperScissorsState
   | BullsAndCowsState
-  | TwentyQuestionsState;
+  | TwentyQuestionsState
+  | BlackjackState;
 
 export type CasualGameAction =
   | { position: number }
   | { choice: RockPaperScissorsChoice }
   | { guess: string }
   | { answer: TwentyQuestionsAnswer }
-  | { verdict: TwentyQuestionsVerdict };
+  | { verdict: TwentyQuestionsVerdict }
+  | { decision: BlackjackDecision };
 
 export interface CasualGameSession<State = Record<string, unknown>> {
   id: string;
